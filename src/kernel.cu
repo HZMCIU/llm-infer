@@ -1,5 +1,12 @@
 #include "kernel.cuh"
 #include <iostream>
+#include <vector>
+
+constexpr int HEAD_DIM = 64;
+
+float *gpu_inv_freq = nullptr;
+float *gpu_cos_table = nullptr;
+float *gpu_sin_table = nullptr;
 
 __global__ void embeddingGatherKernel(int *input_token,
                                       __nv_bfloat16 *model_token_embedding,
@@ -68,4 +75,126 @@ __global__ void rmsNormKernel(__nv_bfloat16 *input, __nv_bfloat16 *output,
 void rmsNorm(__nv_bfloat16 *input, __nv_bfloat16 *output,
              __nv_bfloat16 *norm_weight, int token_num) {
   rmsNormKernel<<<token_num, 1024>>>(input, output, norm_weight, token_num);
+}
+
+void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
+                         float factor, float low_freq_factor,
+                         float high_freq_factor, int max_hidden_dimension) {
+  int half_dim = head_dim / 2;
+  std::vector<float> inv_freq(half_dim);
+  for (int i = 0; i < half_dim; i++) {
+    inv_freq[i] = 1.0f / std::pow(rope_theta, 2.0f * i / head_dim);
+  }
+
+  float low_freq_wave = (float)max_hidden_dimension / low_freq_factor;
+  float high_freq_wave = (float)max_hidden_dimension / high_freq_factor;
+
+  std::vector<float> inv_freq_llama(half_dim);
+  for (int i = 0; i < half_dim; ++i) {
+    float wave_len = 2 * M_PI / inv_freq[i];
+
+    if (wave_len > low_freq_wave) {
+      inv_freq_llama[i] = inv_freq[i] / factor;
+    } else if (wave_len >= high_freq_wave) {
+      float smooth =
+          ((float)max_hidden_dimension / wave_len - low_freq_factor) /
+          (high_freq_factor - low_freq_factor);
+
+      inv_freq_llama[i] =
+          (1.0f - smooth) * (inv_freq[i] / factor) + inv_freq[i] * smooth;
+    }
+  }
+
+  cudaMalloc(&gpu_inv_freq, sizeof(float) * half_dim);
+  cudaMemcpy(gpu_inv_freq, inv_freq_llama.data(), sizeof(float) * half_dim,
+             cudaMemcpyHostToDevice);
+
+  std::vector<float> cos_table(max_token_seq_num * head_dim);
+  std::vector<float> sin_table(max_token_seq_num * head_dim);
+
+  for (int pos = 0; pos < max_token_seq_num; ++pos) {
+    for (int dim = 0; dim < half_dim; ++dim) {
+      float angle = inv_freq_llama[dim] * pos;
+      float c = std::cos(angle);
+      float s = std::sin(angle);
+
+      cos_table[pos * head_dim + 2 * dim] = c;
+      cos_table[pos * head_dim + 2 * dim + 1] = c;
+      sin_table[pos * head_dim + 2 * dim + 1] = s;
+      sin_table[pos * head_dim + 2 * dim + 1] = s;
+    }
+  }
+
+  cudaMalloc(&gpu_cos_table, sizeof(float) * max_token_seq_num * head_dim);
+  cudaMalloc(&gpu_sin_table, sizeof(float) * max_token_seq_num * head_dim);
+  cudaMemcpy(gpu_cos_table, cos_table.data(),
+             sizeof(float) * max_token_seq_num * head_dim,
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_sin_table, cos_table.data(),
+             sizeof(float) * max_token_seq_num * head_dim,
+             cudaMemcpyHostToDevice);
+}
+
+void free_rope_frequency() {
+  if (gpu_inv_freq) {
+    cudaFree(gpu_inv_freq);
+    gpu_inv_freq = nullptr;
+  }
+
+  if (gpu_sin_table) {
+    cudaFree(gpu_sin_table);
+    gpu_sin_table = nullptr;
+  }
+
+  if (gpu_cos_table) {
+    cudaFree(gpu_cos_table);
+    gpu_cos_table = nullptr;
+  }
+}
+
+__global__ void ropeKernel(__nv_bfloat16 *input, int head_dim, int proj_dim,
+                           float *gpu_cos_table, float *gpu_sin_table) {
+  int half_dim = head_dim / 2;
+  int half_proj = proj_dim / 2;
+
+  if (threadIdx.x >= half_proj) {
+    return;
+  }
+
+  int head_idx = threadIdx.x / half_dim;
+  int pair_idx = threadIdx.x % half_dim;
+
+  int token_idx = blockIdx.x;
+
+  int base = token_idx * proj_dim + head_idx * head_dim;
+
+  int idx1 = base + pair_idx;
+  int idx2 = base + pair_idx + half_dim;
+
+  float x1 = (float)input[idx1];
+  float x2 = (float)input[idx2];
+
+  int table_idx = token_idx * head_dim + pair_idx * 2;
+  float c = gpu_cos_table[table_idx];
+  float s = gpu_sin_table[table_idx];
+
+  input[idx1] = (__nv_bfloat16)(x1 * c - x2 * s);
+  input[idx2] = (__nv_bfloat16)(x1 * s + x2 * c);
+}
+
+void rope(__nv_bfloat16 *input, int proj_dim, int token_num) {
+  int num_thread = proj_dim / 2;
+  if (num_thread > 2) {
+    std::cout << "max thread num in a block is 1024" << std::endl;
+    return;
+  }
+
+  ropeKernel<<<token_num, num_thread>>>(input, proj_dim, HEAD_DIM,
+                                        gpu_cos_table, gpu_sin_table);
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    std::cout << "CUDA error: " << cudaGetErrorString(error)
+              << " (code: " << error << ")" << std::endl;
+  }
 }
