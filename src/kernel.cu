@@ -217,3 +217,24 @@ void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
               << " (code: " << error << ")" << std::endl;
   }
 }
+
+__global__ void siluKernel(__nv_bfloat16 *a, __nv_bfloat16 *b) {
+  int work_idx = blockIdx.x * 8196 + threadIdx.x;
+
+  for (int i = 0; i < 8196; i += 1024) {
+    a[work_idx + i] =
+        (__nv_bfloat16)((float)a[work_idx + i] *
+                            (1.0f / (1.0f + expf(-(float)a[work_idx + i]))) +
+                        (float)b[work_idx + i]);
+  }
+}
+
+void silu(__nv_bfloat16 *a, __nv_bfloat16 *b, int token_num) {
+  siluKernel<<<token_num, 1024>>>(a, b);
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    std::cout << "CUDA error: " << cudaGetErrorString(error)
+              << " (code: " << error << ")" << std::endl;
+  }
+}

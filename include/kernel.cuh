@@ -16,3 +16,5 @@ void rope(__nv_bfloat16 *input, int proj_dim, int token_num);
 
 void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
                  int token_num);
+
+void silu(__nv_bfloat16 *a, __nv_bfloat16 *b, int token_num);
