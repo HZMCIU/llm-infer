@@ -13,3 +13,6 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
 void free_rope_frequency();
 
 void rope(__nv_bfloat16 *input, int proj_dim, int token_num);
+
+void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
+                 int token_num);

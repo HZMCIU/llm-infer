@@ -198,3 +198,22 @@ void rope(__nv_bfloat16 *input, int proj_dim, int token_num) {
               << " (code: " << error << ")" << std::endl;
   }
 }
+
+__global__ void residualAddKernel(__nv_bfloat16 *input,
+                                  __nv_bfloat16 *input_embed) {
+  int work_idx = threadIdx.x + blockIdx.x * 2048;
+
+  input[work_idx] = input[work_idx] + input_embed[work_idx];
+  input[work_idx + 1024] = input[work_idx] + input_embed[work_idx + 1024];
+}
+
+void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
+                 int token_num) {
+  residualAddKernel<<<token_num, 1024>>>(input, input_embed);
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    std::cout << "CUDA error: " << cudaGetErrorString(error)
+              << " (code: " << error << ")" << std::endl;
+  }
+}
