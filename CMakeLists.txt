@@ -19,7 +19,7 @@ aux_source_directory(${CMAKE_SOURCE_DIR}/src SRC)
 
 find_package(CUDAToolkit REQUIRED)
 
-add_executable(main src/main.cpp ${SRC})
+add_executable(main ${SRC})
 target_include_directories(main PUBLIC ${CMAKE_SOURCE_DIR}/include)
 
 set_target_properties(main PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
