@@ -1,5 +1,7 @@
 #include <cuda_bf16.h>
 
+#include "const.h"
+
 void embeddingGather(int *input_token, __nv_bfloat16 *model_token_embedding,
                      __nv_bfloat16 *input_token_embedding, int input_token_num);
 
@@ -18,3 +20,7 @@ void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
                  int token_num);
 
 void silu(__nv_bfloat16 *a, __nv_bfloat16 *b, int token_num);
+
+void causalMask(__nv_bfloat16 *input, int token_num);
+
+void softmax(__nv_bfloat16 *input, int token_num);

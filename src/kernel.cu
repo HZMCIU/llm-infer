@@ -2,8 +2,6 @@
 #include <iostream>
 #include <vector>
 
-constexpr int HEAD_DIM = 64;
-
 float *gpu_inv_freq = nullptr;
 float *gpu_cos_table = nullptr;
 float *gpu_sin_table = nullptr;
@@ -237,4 +235,70 @@ void silu(__nv_bfloat16 *a, __nv_bfloat16 *b, int token_num) {
     std::cout << "CUDA error: " << cudaGetErrorString(error)
               << " (code: " << error << ")" << std::endl;
   }
+}
+
+__global__ void causalMaskKernel(__nv_bfloat16 *input, int token_num) {
+  if (threadIdx.x + blockIdx.x * blockDim.x >=
+      token_num * token_num * NUM_Q_HEADS) {
+    return;
+  }
+
+  int column = threadIdx.x;
+  int row = blockIdx.x % token_num;
+  if (column > row) {
+    input[blockIdx.x * token_num + threadIdx.x] = -HUGE_VALF;
+  }
+}
+
+void causalMask(__nv_bfloat16 *input, int token_num) {
+  if (token_num > 1024) {
+    std::cout << "cannot launch more than 1024 threads" << std::endl;
+    return;
+  }
+
+  causalMaskKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
+
+  cudaError error = cudaGetLastError();
+  if (error != cudaError::cudaSuccess) {
+    std::cout << "CUDA last error: " << error << std::endl;
+  }
+}
+
+__global__ void softmaxKernel(__nv_bfloat16 *input, int token_num) {
+  __shared__ float m[1024];
+  __shared__ float d[1024];
+
+  int work_idx = blockIdx.x * token_num + threadIdx.x;
+  float token = (float)input[work_idx];
+
+  m[threadIdx.x] = token;
+  d[threadIdx.x] = 1.0f;
+  __syncthreads();
+
+  for (int i = 1; i < token_num; i = i * 2) {
+    if (threadIdx.x % (i * 2) == 0 && threadIdx.x + i < token_num) {
+      float m_a = m[threadIdx.x];
+      float d_a = d[threadIdx.x];
+      float m_b = m[threadIdx.x + i];
+      float d_b = m[threadIdx.x + i];
+
+      float m_new = fmaxf(m_a, m_b);
+      float d_new = d_a * expf(m_a - m_new) + d_b * expf(m_b - m_new);
+
+      m[threadIdx.x] = m_new;
+      d[threadIdx.x] = d_new;
+    }
+    __syncthreads();
+  }
+
+  input[work_idx] = (__nv_bfloat16)(expf(token - m[0]) / d[0]);
+}
+
+void softmax(__nv_bfloat16 *input, int token_num) {
+  if (token_num > 1024) {
+    std::cout << "cannot launch more than 1024 kernel" << std::endl;
+    return;
+  }
+
+  softmaxKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
 }
