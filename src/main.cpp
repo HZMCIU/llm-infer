@@ -3,6 +3,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <queue>
 
 #include "json.hpp"
 #include "kernel.cuh"
