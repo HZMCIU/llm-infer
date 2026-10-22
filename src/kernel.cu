@@ -35,6 +35,29 @@ void embeddingGather(int *input_token, __nv_bfloat16 *model_token_embedding,
   }
 }
 
+__global__ void embeddingGatherDecodeKernel(int *last_tokens_gpu, int token_num,
+                                            __nv_bfloat16 *output,
+                                            __nv_bfloat16 *embed_tokens) {
+  int input_token = last_tokens_gpu[blockIdx.x];
+  int work_idx = blockIdx.x * 2048 + threadIdx.x;
+  if (work_idx < token_num * 2048) {
+    output[work_idx] = embed_tokens[input_token * 2048 + threadIdx.x];
+    output[work_idx + 2048] =
+        embed_tokens[input_token * 2048 + threadIdx.x + 1024];
+  }
+}
+
+void embeddingGatherDecode(int *last_token_gpu, int token_num,
+                           __nv_bfloat16 *output, __nv_bfloat16 *embed_tokens) {
+  embeddingGatherDecodeKernel<<<token_num, 1024>>>(last_tokens_gpu, token_num,
+                                                   output, embed_tokens);
+
+  cudaError error = cudaGetLastError();
+  if (error != cudaError::cudaSuccess) {
+    std::cout << "CUDA last error: " << cudaGetErrorName(error) << std::endl;
+  }
+}
+
 __global__ void rmsNormKernel(__nv_bfloat16 *input, __nv_bfloat16 *output,
                               __nv_bfloat16 *model_norm_weight, int token_num) {
   __shared__ float rms_vector[1024];
@@ -197,6 +220,37 @@ void rope(__nv_bfloat16 *input, int proj_dim, int token_num) {
   }
 }
 
+__global__ void ropeDecodeKernel(__nv_bfloat16 *input, int position_in_sequence,
+                                 int proj_dim) {
+  if (2 * threadIdx.x + 1 < proj_dim) {
+    int double_i = 2 * (threadIdx.x % 32);
+    float theta = 1.0 / (std::pow(500000.0f, ((float)double_i / HEAD_DIM)));
+    float angle = position_in_sequence * theta;
+    __nv_bfloat16 prev_2i = input[2 * threadIdx.x];
+    __nv_bfloat16 prev_2i_1 = input[2 * threadIdx.x + 1];
+    input[2 * threadIdx.x] =
+        (__nv_bfloat16)((float)prev_2i * std::cos(angle) -
+                        (float)prev_2i_1 * std::sin(angle));
+    input[2 * threadIdx.x + 1] =
+        (__nv_bfloat16)((float)prev_2i * std::sin(angle) +
+                        (float)prev_2i_1 * std::cos(angle));
+  }
+}
+
+void ropeDecode(__nv_bfloat16 *input, int position_in_sequence, int proj_dim) {
+  int thread_num = proj_dim / 2;
+  if (thread_num > 1024) {
+    return;
+  }
+
+  ropeDecodeKernel<<<1, thread_num>>>(input, position_in_sequence, proj_dim);
+
+  cudaError error = cudaGetLastError();
+  if (error != cudaError::cudaSuccess) {
+    std::cout << "CUDA last error: " << cudaGetErrorString(error) << std::endl;
+  }
+}
+
 __global__ void residualAddKernel(__nv_bfloat16 *input,
                                   __nv_bfloat16 *input_embed) {
   int work_idx = threadIdx.x + blockIdx.x * 2048;
@@ -271,8 +325,10 @@ __global__ void softmaxKernel(__nv_bfloat16 *input, int token_num) {
   int work_idx = blockIdx.x * token_num + threadIdx.x;
   float token = (float)input[work_idx];
 
-  m[threadIdx.x] = token;
-  d[threadIdx.x] = 1.0f;
+  bool masked = !isfinite(token);
+
+  m[threadIdx.x] = masked ? -INFINITY : token;
+  d[threadIdx.x] = masked ? 0.0f : 1.0f;
   __syncthreads();
 
   for (int i = 1; i < token_num; i = i * 2) {
@@ -282,16 +338,25 @@ __global__ void softmaxKernel(__nv_bfloat16 *input, int token_num) {
       float m_b = m[threadIdx.x + i];
       float d_b = m[threadIdx.x + i];
 
+      // float m_new = fmaxf(m_a, m_b);
+      // float d_new = d_a * expf(m_a - m_new) + d_b * expf(m_b - m_new);
+      //
+      // m[threadIdx.x] = m_new;
+      // d[threadIdx.x] = d_new;
       float m_new = fmaxf(m_a, m_b);
-      float d_new = d_a * expf(m_a - m_new) + d_b * expf(m_b - m_new);
-
-      m[threadIdx.x] = m_new;
-      d[threadIdx.x] = d_new;
+      float d_new = 0.0f;
+      if (d_a > 0.0f) {
+        d_new += d_a * expf(m_a - m_new);
+      }
+      if (d_b > 0.0f) {
+        d_new += d_b * expf(m_b - m_new);
+      }
     }
     __syncthreads();
   }
 
-  input[work_idx] = (__nv_bfloat16)(expf(token - m[0]) / d[0]);
+  input[work_idx] =
+      masked ? (__nv_bfloat16)0.0f : (__nv_bfloat16)(expf(token - m[0]) / d[0]);
 }
 
 void softmax(__nv_bfloat16 *input, int token_num) {
@@ -301,4 +366,62 @@ void softmax(__nv_bfloat16 *input, int token_num) {
   }
 
   softmaxKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
+}
+
+__global__ void softmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
+  __shared__ float m[1024];
+  __shared__ float d[1024];
+
+  int work_idx = blockIdx.x + MAX_SEQ_LEN + threadIdx.x;
+}
+
+__global__ void softmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
+  __shared__ float m[1024];
+  __shared__ float d[1024];
+
+  int workIndex = blockIdx.x * MAX_SEQ_LEN + threadIdx.x;
+  float token = (float)input[workIndex];
+
+  m[threadIdx.x] = token;
+  d[threadIdx.x] = 1.0f;
+  __syncthreads();
+
+  for (int i = 1; i < seq_len; i = i * 2) {
+    if (threadIdx.x % (i * 2) == 0 && threadIdx.x + i < seq_len) {
+      float m_a = m[threadIdx.x];
+      float d_a = d[threadIdx.x];
+      float m_b = m[threadIdx.x + i];
+      float d_b = d[threadIdx.x + i];
+
+      // float m_new = fmaxf(m_a, m_b);
+      // float d_new = d_a * expf(m_a - m_new) + d_b * expf(m_b - m_new);
+      //
+      // m[threadIdx.x] = m_new;
+      // d[threadIdx.x] = d_new;
+      float m_new = fmaxf(m_a, m_b);
+      float d_new = 0.0f;
+      if (d_a > 0.0f)
+        d_new += d_a * expf(m_a - m_new); // 关键：跳过全掩码子树
+      if (d_b > 0.0f)
+        d_new += d_b * expf(m_b - m_new);
+
+      m[threadIdx.x] = m_new;
+      d[threadIdx.x] = d_new;
+    }
+    __syncthreads();
+  }
+
+  input[workIndex] = (__nv_bfloat16)(expf(token - m[0]) / d[0]);
+}
+
+void softmaxDecode(__nv_bfloat16 *input, int seq_len) {
+  if (seq_len > 1024) {
+    return;
+  }
+  softmaxDecodeKernel<<<NUM_Q_HEADS, seq_len>>>(input, seq_len);
+
+  cudaError error = cudaGetLastError();
+  if (error != cudaError::cudaSuccess) {
+    std::cout << "CUDA last error: " << cudaGetErrorString(error) << std::endl;
+  }
 }

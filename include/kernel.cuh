@@ -4,6 +4,8 @@
 
 void embeddingGather(int *input_token, __nv_bfloat16 *model_token_embedding,
                      __nv_bfloat16 *input_token_embedding, int input_token_num);
+void embeddingGatherDecode(int *last_tokens_gpu, int token_num,
+                           __nv_bfloat16 *output, __nv_bfloat16 *embed_tokens);
 
 void rmsNorm(__nv_bfloat16 *input, __nv_bfloat16 *output,
              __nv_bfloat16 *norm_weight, int num_token);
@@ -15,6 +17,7 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
 void free_rope_frequency();
 
 void rope(__nv_bfloat16 *input, int proj_dim, int token_num);
+void ropeDecode(__nv_bfloat16 *input, int position_in_sequence, int proj_dim);
 
 void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
                  int token_num);
@@ -24,3 +27,4 @@ void silu(__nv_bfloat16 *a, __nv_bfloat16 *b, int token_num);
 void causalMask(__nv_bfloat16 *input, int token_num);
 
 void softmax(__nv_bfloat16 *input, int token_num);
+void softmaxDecode(__nv_bfloat16 *input, int seq_len);
