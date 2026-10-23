@@ -2,6 +2,8 @@
 #include <iostream>
 #include <vector>
 
+#include "helper.h"
+
 float *gpu_inv_freq = nullptr;
 float *gpu_cos_table = nullptr;
 float *gpu_sin_table = nullptr;
@@ -29,11 +31,7 @@ void embeddingGather(int *input_token, __nv_bfloat16 *model_token_embedding,
       input_token, model_token_embedding, input_token_embedding,
       input_token_num);
 
-  cudaError error = cudaGetLastError();
-  if (error != cudaError::cudaSuccess) {
-    std::cout << "embeddingGather CUDA last error: " << cudaGetLastError()
-              << std::endl;
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void embeddingGatherDecodeKernel(int *last_tokens_gpu, int token_num,
@@ -53,10 +51,7 @@ void embeddingGatherDecode(int *last_token_gpu, int token_num,
   embeddingGatherDecodeKernel<<<token_num, 1024>>>(last_token_gpu, token_num,
                                                    output, embed_tokens);
 
-  cudaError error = cudaGetLastError();
-  if (error != cudaError::cudaSuccess) {
-    std::cout << "CUDA last error: " << cudaGetErrorName(error) << std::endl;
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void rmsNormKernel(__nv_bfloat16 *input, __nv_bfloat16 *output,
@@ -97,6 +92,8 @@ __global__ void rmsNormKernel(__nv_bfloat16 *input, __nv_bfloat16 *output,
 void rmsNorm(__nv_bfloat16 *input, __nv_bfloat16 *output,
              __nv_bfloat16 *norm_weight, int token_num) {
   rmsNormKernel<<<token_num, 1024>>>(input, output, norm_weight, token_num);
+
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
@@ -127,9 +124,9 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
     }
   }
 
-  cudaMalloc(&gpu_inv_freq, sizeof(float) * half_dim);
-  cudaMemcpy(gpu_inv_freq, inv_freq_llama.data(), sizeof(float) * half_dim,
-             cudaMemcpyHostToDevice);
+  CUDA_CHECK(cudaMalloc(&gpu_inv_freq, sizeof(float) * half_dim));
+  CUDA_CHECK(cudaMemcpy(gpu_inv_freq, inv_freq_llama.data(),
+                        sizeof(float) * half_dim, cudaMemcpyHostToDevice));
 
   std::vector<float> cos_table(max_token_seq_num * head_dim);
   std::vector<float> sin_table(max_token_seq_num * head_dim);
@@ -147,14 +144,18 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
     }
   }
 
-  cudaMalloc(&gpu_cos_table, sizeof(float) * max_token_seq_num * head_dim);
-  cudaMalloc(&gpu_sin_table, sizeof(float) * max_token_seq_num * head_dim);
-  cudaMemcpy(gpu_cos_table, cos_table.data(),
-             sizeof(float) * max_token_seq_num * head_dim,
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(gpu_sin_table, cos_table.data(),
-             sizeof(float) * max_token_seq_num * head_dim,
-             cudaMemcpyHostToDevice);
+  CUDA_CHECK(
+      cudaMalloc(&gpu_cos_table, sizeof(float) * max_token_seq_num * head_dim));
+  CUDA_CHECK(
+      cudaMalloc(&gpu_sin_table, sizeof(float) * max_token_seq_num * head_dim));
+  CUDA_CHECK(cudaMemcpy(gpu_cos_table, cos_table.data(),
+                        sizeof(float) * max_token_seq_num * head_dim,
+                        cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(gpu_sin_table, cos_table.data(),
+                        sizeof(float) * max_token_seq_num * head_dim,
+                        cudaMemcpyHostToDevice));
+
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void free_rope_frequency() {
@@ -214,11 +215,7 @@ void rope(__nv_bfloat16 *input, int proj_dim, int token_num) {
   ropeKernel<<<token_num, num_thread>>>(input, proj_dim, HEAD_DIM,
                                         gpu_cos_table, gpu_sin_table);
 
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-    std::cout << "CUDA error: " << cudaGetErrorString(error)
-              << " (code: " << error << ")" << std::endl;
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void ropeDecodeKernel(__nv_bfloat16 *input, int position_in_sequence,
@@ -246,10 +243,7 @@ void ropeDecode(__nv_bfloat16 *input, int position_in_sequence, int proj_dim) {
 
   ropeDecodeKernel<<<1, thread_num>>>(input, position_in_sequence, proj_dim);
 
-  cudaError error = cudaGetLastError();
-  if (error != cudaError::cudaSuccess) {
-    std::cout << "CUDA last error: " << cudaGetErrorString(error) << std::endl;
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void residualAddKernel(__nv_bfloat16 *input,
@@ -264,11 +258,7 @@ void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
                  int token_num) {
   residualAddKernel<<<token_num, 1024>>>(input, input_embed);
 
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-    std::cout << "CUDA error: " << cudaGetErrorString(error)
-              << " (code: " << error << ")" << std::endl;
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void siluKernel(__nv_bfloat16 *a, __nv_bfloat16 *b) {
@@ -285,11 +275,7 @@ __global__ void siluKernel(__nv_bfloat16 *a, __nv_bfloat16 *b) {
 void silu(__nv_bfloat16 *a, __nv_bfloat16 *b, int token_num) {
   siluKernel<<<token_num, 1024>>>(a, b);
 
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-    std::cout << "CUDA error: " << cudaGetErrorString(error)
-              << " (code: " << error << ")" << std::endl;
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void causalMaskKernel(__nv_bfloat16 *input, int token_num) {
@@ -313,10 +299,7 @@ void causalMask(__nv_bfloat16 *input, int token_num) {
 
   causalMaskKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
 
-  cudaError error = cudaGetLastError();
-  if (error != cudaError::cudaSuccess) {
-    std::cout << "CUDA last error: " << error << std::endl;
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void softmaxKernel(__nv_bfloat16 *input, int token_num) {
@@ -367,6 +350,8 @@ void softmax(__nv_bfloat16 *input, int token_num) {
   }
 
   softmaxKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
+
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void softmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
@@ -414,10 +399,7 @@ void softmaxDecode(__nv_bfloat16 *input, int seq_len) {
   }
   softmaxDecodeKernel<<<NUM_Q_HEADS, seq_len>>>(input, seq_len);
 
-  cudaError error = cudaGetLastError();
-  if (error != cudaError::cudaSuccess) {
-    std::cout << "CUDA last error: " << cudaGetErrorString(error) << std::endl;
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void pagedAttentionKernel(int layer, int active_slot_num,
@@ -502,4 +484,6 @@ void pagedAttention(int layer, int active_slot_num, __nv_bfloat16 *q_proj,
   pagedAttentionKernel<<<dim3(active_slot_num, NUM_Q_HEADS), HEAD_DIM>>>(
       layer, active_slot_num, q_proj, kv_cache, block_table_gpu, seq_lens_gpu,
       active_slots_gpu, output);
+
+  CUDA_CHECK(cudaDeviceSynchronize());
 }

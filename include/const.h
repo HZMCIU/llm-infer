@@ -1,4 +1,8 @@
 #pragma once
+
+#include <algorithm>
+#include <cuda_bf16.h>
+
 constexpr int MAX_NEW_TOKENS_GENERATED =
     20; // TODO: parameterize it with program arguments
 constexpr int B_TO_MB = 1024 * 1024;
@@ -26,7 +30,9 @@ constexpr int BLOCK_SIZE =
     16; // TODO: tunable as well, defined the size of a single page in pagedattn
 constexpr int V_OFFSET = BLOCK_SIZE * KV_DIM * sizeof(__nv_bfloat16);
 constexpr int BLOCK_BYTES = V_OFFSET * 2; // * 2 because K and V
-constexpr size_t KV_CACHE_SIZE_BYTES = 2ULL * 1024 * 1024 * 1024; // TODO: 2GB
+// constexpr size_t KV_CACHE_SIZE_BYTES = 2ULL * 1024 * 1024 * 1024; // TODO:
+// 2GB
+constexpr size_t KV_CACHE_SIZE_BYTES = 512ULL * 1024 * 1024; // TODO: 2GB
 constexpr int MAX_BLOCKS_PER_SEQ = MAX_SEQ_LEN / BLOCK_SIZE; // 2048 / 16 = 128
 constexpr int NUM_BLOCKS =
     KV_CACHE_SIZE_BYTES / BLOCK_BYTES; // 2*1024*1024*1024/(16*512*2*2) = 65536

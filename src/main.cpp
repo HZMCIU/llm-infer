@@ -9,6 +9,7 @@
 #include <library_types.h>
 #include <queue>
 
+#include "helper.h"
 #include "json.hpp"
 #include "kernel.cuh"
 #include "model.h"
@@ -32,15 +33,16 @@ int main(int argc, char *argv[]) {
                       8192);
 
   __nv_bfloat16 *kv_cache;
-  cudaMalloc(&kv_cache, KV_CACHE_SIZE_BYTES);
+  CUDA_CHECK(cudaMalloc(&kv_cache, KV_CACHE_SIZE_BYTES));
   std::vector<int> free_blocks(NUM_BLOCKS);
   std::iota(free_blocks.begin(), free_blocks.end(), 0);
   std::vector<int> block_table(MAX_SEQUENCES * N_LAYERS * MAX_BLOCKS_PER_SEQ,
                                -1);
 
   int *block_table_gpu;
-  cudaMalloc(&block_table_gpu,
-             MAX_SEQUENCES * N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int));
+  CUDA_CHECK(
+      cudaMalloc(&block_table_gpu,
+                 MAX_SEQUENCES * N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int)));
 
   std::queue<std::vector<int>> queue;
   queue.push({128000, 128006, 882, 128007, 271, 3923, 374, 220, 17, 10, 17, 30,
@@ -68,38 +70,40 @@ int main(int argc, char *argv[]) {
   std::vector<int> active_tokens;
 
   int *active_slots_gpu;
-  cudaMalloc(&active_slots_gpu, BATCH_SIZE * sizeof(int));
+  CUDA_CHECK(cudaMalloc(&active_slots_gpu, BATCH_SIZE * sizeof(int)));
   int *seq_lens_gpu;
-  cudaMalloc(&seq_lens_gpu, BATCH_SIZE * sizeof(int));
+  CUDA_CHECK(cudaMalloc(&seq_lens_gpu, BATCH_SIZE * sizeof(int)));
 
   std::vector<int> prompt;
   int prompt_len;
   int *input_tokens_gpu;
-  cudaMalloc(&input_tokens_gpu, MAX_PROMPT_LEN * sizeof(int));
+  CUDA_CHECK(cudaMalloc(&input_tokens_gpu, MAX_PROMPT_LEN * sizeof(int)));
   __nv_bfloat16 *input_embeddings;
-  cudaMalloc(&input_embeddings,
-             MAX_PROMPT_LEN * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH);
+  CUDA_CHECK(
+      cudaMalloc(&input_embeddings,
+                 MAX_PROMPT_LEN * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
 
   __nv_bfloat16 *hidden_state;
-  cudaMalloc(&hidden_state,
-             MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH);
+  CUDA_CHECK(cudaMalloc(&hidden_state, MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) *
+                                           EMBEDDING_LENGTH));
 
   __nv_bfloat16 *rms_norms;
-  cudaMalloc(&rms_norms,
-             MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH);
+  CUDA_CHECK(cudaMalloc(&rms_norms, MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) *
+                                        EMBEDDING_LENGTH));
 
   __nv_bfloat16 *buf_2048_1;
-  cudaMalloc(&buf_2048_1,
-             MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH);
+  CUDA_CHECK(cudaMalloc(&buf_2048_1, MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) *
+                                         EMBEDDING_LENGTH));
   __nv_bfloat16 *q_proj;
   float q_proj_alpha = 1.0f;
   float q_proj_beta = 0.0f;
 
   __nv_bfloat16 *k_proj_temp_buf;
-  cudaMalloc(&k_proj_temp_buf, MAX_PROMPT_LEN * KV_DIM * sizeof(__nv_bfloat16));
-
+  CUDA_CHECK(cudaMalloc(&k_proj_temp_buf,
+                        MAX_PROMPT_LEN * KV_DIM * sizeof(__nv_bfloat16)));
   __nv_bfloat16 *v_proj_temp_buf;
-  cudaMalloc(&v_proj_temp_buf, MAX_PROMPT_LEN * KV_DIM * sizeof(__nv_bfloat16));
+  CUDA_CHECK(cudaMalloc(&v_proj_temp_buf,
+                        MAX_PROMPT_LEN * KV_DIM * sizeof(__nv_bfloat16)));
 
   float k_proj_alpha = 1.0f;
   float k_proj_beta = 0.0f;
@@ -108,8 +112,9 @@ int main(int argc, char *argv[]) {
   float v_proj_beta = 0.0f;
 
   __nv_bfloat16 *prefill_attn_scores;
-  cudaMalloc(&prefill_attn_scores, MAX_PROMPT_LEN * MAX_PROMPT_LEN *
-                                       sizeof(__nv_bfloat16) * NUM_Q_HEADS);
+  CUDA_CHECK(cudaMalloc(&prefill_attn_scores, MAX_PROMPT_LEN * MAX_PROMPT_LEN *
+                                                  sizeof(__nv_bfloat16) *
+                                                  NUM_Q_HEADS));
 
   float attn_alpha = 1.0f / 8.0f;
   float attn_beta = 0.0f;
@@ -119,19 +124,21 @@ int main(int argc, char *argv[]) {
   float attn_scores_v_beta = 0.0f;
 
   __nv_bfloat16 *buf_2048_2;
-  cudaMalloc(&buf_2048_2,
-             MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH);
+  CUDA_CHECK(cudaMalloc(&buf_2048_2, MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) *
+                                         EMBEDDING_LENGTH));
   __nv_bfloat16 *o_proj;
   float o_proj_alpha = 1.0f;
   float o_proj_beta = 0.0f;
 
   __nv_bfloat16 *gate;
-  cudaMalloc(&gate, MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) * HIDDEN_DIM);
+  CUDA_CHECK(
+      cudaMalloc(&gate, MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) * HIDDEN_DIM));
   float gate_alpha = 1.0f;
   float gate_beta = 0.0f;
 
   __nv_bfloat16 *up;
-  cudaMalloc(&up, MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) * HIDDEN_DIM);
+  CUDA_CHECK(
+      cudaMalloc(&up, MAX_BUFFER_SIZE * sizeof(__nv_bfloat16) * HIDDEN_DIM));
   float up_alpha = 1.0f;
   float up_beta = 0.0f;
 
@@ -140,7 +147,8 @@ int main(int argc, char *argv[]) {
   float down_beta = 0.0f;
 
   __nv_bfloat16 *embed_proj;
-  cudaMalloc(&embed_proj, sizeof(__nv_bfloat16) * MAX_BUFFER_SIZE * VOCAB_SIZE);
+  CUDA_CHECK(cudaMalloc(&embed_proj,
+                        sizeof(__nv_bfloat16) * MAX_BUFFER_SIZE * VOCAB_SIZE));
   float embed_alpha = 1.0f;
   float embed_beta = 0.0f;
 
@@ -148,15 +156,15 @@ int main(int argc, char *argv[]) {
   embed_proj_cpu.resize(MAX_BUFFER_SIZE * VOCAB_SIZE);
 
   int *last_tokens_gpu;
-  cudaMalloc(&last_tokens_gpu, BATCH_SIZE * sizeof(int));
+  CUDA_CHECK(cudaMalloc(&last_tokens_gpu, BATCH_SIZE * sizeof(int)));
 
   __nv_bfloat16 *k_proj_batched_buffer;
-  cudaMalloc(&k_proj_batched_buffer,
-             BATCH_SIZE * sizeof(__nv_bfloat16) * KV_DIM);
+  CUDA_CHECK(cudaMalloc(&k_proj_batched_buffer,
+                        BATCH_SIZE * sizeof(__nv_bfloat16) * KV_DIM));
 
   __nv_bfloat16 *v_proj_batched_buffer;
-  cudaMalloc(&v_proj_batched_buffer,
-             BATCH_SIZE * sizeof(__nv_bfloat16) * KV_DIM);
+  CUDA_CHECK(cudaMalloc(&v_proj_batched_buffer,
+                        BATCH_SIZE * sizeof(__nv_bfloat16) * KV_DIM));
 
   for (int slot = 0; slot < is_slot_free.size() && !queue.empty(); ++slot) {
     if (!is_slot_free[slot]) {

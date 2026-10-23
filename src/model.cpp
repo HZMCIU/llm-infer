@@ -54,17 +54,17 @@ int loadWeight(Weights &weights) {
 
   // std::cout << "max_offset: " << max_offset << std::endl;
   void *model_weights;
-  cudaMalloc(&model_weights, max_offset);
+  CUDA_CHECK(cudaMalloc(&model_weights, max_offset));
 
   std::vector<char> model_weights_cpu;
   model_weights_cpu.resize(max_offset);
 
-  cudaMalloc(&model_weights, max_offset);
+  CUDA_CHECK(cudaMalloc(&model_weights, max_offset));
   model_weights_cpu.resize(max_offset);
   safetensors_file.read(model_weights_cpu.data(), max_offset);
 
-  cudaMemcpy(model_weights, model_weights_cpu.data(), max_offset,
-             cudaMemcpyHostToDevice);
+  CUDA_CHECK(cudaMemcpy(model_weights, model_weights_cpu.data(), max_offset,
+                        cudaMemcpyHostToDevice));
   safetensors_file.close();
 
   weights.embed_tokens =
