@@ -1,10 +1,10 @@
+#pragma once
+
+#include "const.h"
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include <fstream>
 #include <iostream>
-
-constexpr int B_TO_MB = 1024 * 1024;
-constexpr int B_TO_GB = 1024 * 1024 * 1024;
 
 int checkGPUStatus() {
   int device_count = 0;

@@ -28,3 +28,8 @@ void causalMask(__nv_bfloat16 *input, int token_num);
 
 void softmax(__nv_bfloat16 *input, int token_num);
 void softmaxDecode(__nv_bfloat16 *input, int seq_len);
+
+void pagedAttention(int layer, int active_slot_num, __nv_bfloat16 *q_proj,
+                    __nv_bfloat16 *kv_cache, int *block_table_gpu,
+                    int *seq_lens_gpu, int *active_slots_gpu,
+                    __nv_bfloat16 *output);

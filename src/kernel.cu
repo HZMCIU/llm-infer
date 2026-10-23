@@ -31,7 +31,8 @@ void embeddingGather(int *input_token, __nv_bfloat16 *model_token_embedding,
 
   cudaError error = cudaGetLastError();
   if (error != cudaError::cudaSuccess) {
-    std::cout << "CUDA last error: " << cudaGetLastError() << std::endl;
+    std::cout << "embeddingGather CUDA last error: " << cudaGetLastError()
+              << std::endl;
   }
 }
 
@@ -49,7 +50,7 @@ __global__ void embeddingGatherDecodeKernel(int *last_tokens_gpu, int token_num,
 
 void embeddingGatherDecode(int *last_token_gpu, int token_num,
                            __nv_bfloat16 *output, __nv_bfloat16 *embed_tokens) {
-  embeddingGatherDecodeKernel<<<token_num, 1024>>>(last_tokens_gpu, token_num,
+  embeddingGatherDecodeKernel<<<token_num, 1024>>>(last_token_gpu, token_num,
                                                    output, embed_tokens);
 
   cudaError error = cudaGetLastError();
@@ -372,13 +373,6 @@ __global__ void softmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
   __shared__ float m[1024];
   __shared__ float d[1024];
 
-  int work_idx = blockIdx.x + MAX_SEQ_LEN + threadIdx.x;
-}
-
-__global__ void softmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
-  __shared__ float m[1024];
-  __shared__ float d[1024];
-
   int workIndex = blockIdx.x * MAX_SEQ_LEN + threadIdx.x;
   float token = (float)input[workIndex];
 
@@ -424,4 +418,88 @@ void softmaxDecode(__nv_bfloat16 *input, int seq_len) {
   if (error != cudaError::cudaSuccess) {
     std::cout << "CUDA last error: " << cudaGetErrorString(error) << std::endl;
   }
+}
+
+__global__ void pagedAttentionKernel(int layer, int active_slot_num,
+                                     __nv_bfloat16 *q_proj,
+                                     __nv_bfloat16 *kv_cache,
+                                     int *block_table_gpu, int *seq_lens_gpu,
+                                     int *active_slots_gpu,
+                                     __nv_bfloat16 *output) {
+  __shared__ float dot_products[2];
+  int active_slot = blockIdx.x;
+  int slot = active_slots_gpu[active_slot];
+  int q_head_id = blockIdx.y;
+  int thread_id = threadIdx.x;
+  int kv_head_idx = q_head_id / GQA_Q_TO_K_RATIO;
+  __nv_bfloat16 q =
+      q_proj[active_slot * EMBEDDING_LENGTH + q_head_id * HEAD_DIM + thread_id];
+  int seq_len = seq_lens_gpu[active_slot];
+  int blocks_num = (seq_len + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+  float current_max = -INFINITY;
+  float acc = 0.0f;
+  float d = 0.0f;
+
+  for (int logical_block_idx = 0; logical_block_idx < blocks_num;
+       ++logical_block_idx) {
+    int physical_block =
+        block_table_gpu[slot * N_LAYERS * MAX_BLOCKS_PER_SEQ +
+                        layer * MAX_BLOCKS_PER_SEQ + logical_block_idx];
+    int tokens_in_block =
+        min(seq_len - logical_block_idx * BLOCK_SIZE, BLOCK_SIZE);
+
+    for (int token = 0; token < tokens_in_block; ++token) {
+      __nv_bfloat16 *k =
+          (__nv_bfloat16 *)((char *)kv_cache + physical_block * BLOCK_BYTES +
+                            token * KV_DIM * sizeof(__nv_bfloat16) +
+                            kv_head_idx * HEAD_DIM * sizeof(__nv_bfloat16) +
+                            thread_id * sizeof(__nv_bfloat16));
+      __nv_bfloat16 *v =
+          (__nv_bfloat16 *)((char *)kv_cache + physical_block * BLOCK_BYTES +
+                            V_OFFSET + token * KV_DIM * sizeof(__nv_bfloat16) +
+                            kv_head_idx * HEAD_DIM * sizeof(__nv_bfloat16) +
+                            thread_id * sizeof(__nv_bfloat16));
+
+      float qk = (float)q * (float)*k;
+      qk += __shfl_down_sync(WARP_FULL_MASK, qk, 16);
+      qk += __shfl_down_sync(WARP_FULL_MASK, qk, 8);
+      qk += __shfl_down_sync(WARP_FULL_MASK, qk, 4);
+      qk += __shfl_down_sync(WARP_FULL_MASK, qk, 2);
+      qk += __shfl_down_sync(WARP_FULL_MASK, qk, 1);
+
+      if (thread_id == 0) {
+        dot_products[0] = qk;
+      }
+      if (thread_id == 32) {
+        dot_products[1] = qk;
+      }
+      __syncthreads();
+      if (thread_id == 0) {
+        dot_products[0] = (dot_products[0] + dot_products[1]) / SQRT_HEAD_DIM;
+      }
+      __syncthreads();
+      float dot_product = dot_products[0];
+      float new_max = current_max;
+      if (dot_product > current_max) {
+        new_max = dot_product;
+      }
+      float correction_factor = expf(current_max - new_max);
+      current_max = new_max;
+      float exp_score = expf(dot_product - current_max);
+      d = d * correction_factor + exp_score;
+      acc = acc * correction_factor + exp_score * (float)*v;
+    }
+  }
+  output[active_slot * EMBEDDING_LENGTH + q_head_id * HEAD_DIM + thread_id] =
+      acc / d;
+}
+
+void pagedAttention(int layer, int active_slot_num, __nv_bfloat16 *q_proj,
+                    __nv_bfloat16 *kv_cache, int *block_table_gpu,
+                    int *seq_lens_gpu, int *active_slots_gpu,
+                    __nv_bfloat16 *output) {
+  pagedAttentionKernel<<<dim3(active_slot_num, NUM_Q_HEADS), HEAD_DIM>>>(
+      layer, active_slot_num, q_proj, kv_cache, block_table_gpu, seq_lens_gpu,
+      active_slots_gpu, output);
 }
