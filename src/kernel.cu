@@ -4,7 +4,7 @@
 
 #include "helper.h"
 
-float *gpu_inv_freq = nullptr;
+// float *gpu_inv_freq = nullptr;
 float *gpu_cos_table = nullptr;
 float *gpu_sin_table = nullptr;
 
@@ -108,7 +108,7 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
   float low_freq_wave = (float)max_hidden_dimension / low_freq_factor;
   float high_freq_wave = (float)max_hidden_dimension / high_freq_factor;
 
-  std::vector<float> inv_freq_llama(half_dim);
+  std::vector<float> inv_freq_llama = inv_freq;
   for (int i = 0; i < half_dim; ++i) {
     float wave_len = 2 * M_PI / inv_freq[i];
 
@@ -124,9 +124,13 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
     }
   }
 
-  CUDA_CHECK(cudaMalloc(&gpu_inv_freq, sizeof(float) * half_dim));
-  CUDA_CHECK(cudaMemcpy(gpu_inv_freq, inv_freq_llama.data(),
-                        sizeof(float) * half_dim, cudaMemcpyHostToDevice));
+  // for (int i = 0; i < half_dim; ++i) {
+  //   printf("inv_freq_llama[%d]: %.30f\n", i, inv_freq_llama[i]);
+  // }
+
+  // CUDA_CHECK(cudaMalloc(&gpu_inv_freq, sizeof(float) * half_dim));
+  // CUDA_CHECK(cudaMemcpy(gpu_inv_freq, inv_freq_llama.data(),
+  //                       sizeof(float) * half_dim, cudaMemcpyHostToDevice));
 
   std::vector<float> cos_table(max_token_seq_num * head_dim);
   std::vector<float> sin_table(max_token_seq_num * head_dim);
@@ -139,7 +143,7 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
 
       cos_table[pos * head_dim + 2 * dim] = c;
       cos_table[pos * head_dim + 2 * dim + 1] = c;
-      sin_table[pos * head_dim + 2 * dim + 1] = s;
+      sin_table[pos * head_dim + 2 * dim] = s;
       sin_table[pos * head_dim + 2 * dim + 1] = s;
     }
   }
@@ -151,18 +155,23 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
   CUDA_CHECK(cudaMemcpy(gpu_cos_table, cos_table.data(),
                         sizeof(float) * max_token_seq_num * head_dim,
                         cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMemcpy(gpu_sin_table, cos_table.data(),
+  CUDA_CHECK(cudaMemcpy(gpu_sin_table, sin_table.data(),
                         sizeof(float) * max_token_seq_num * head_dim,
                         cudaMemcpyHostToDevice));
 
   CUDA_CHECK(cudaDeviceSynchronize());
+
+  // for (int i = 199 * head_dim; i < 200 * head_dim; ++i) {
+  //   printf("cos[%d]: %f\n", i, cos_table[i]);
+  //   printf("sin[%d]: %f\n", i, sin_table[i]);
+  // }
 }
 
 void free_rope_frequency() {
-  if (gpu_inv_freq) {
-    cudaFree(gpu_inv_freq);
-    gpu_inv_freq = nullptr;
-  }
+  // if (gpu_inv_freq) {
+  //   cudaFree(gpu_inv_freq);
+  //   gpu_inv_freq = nullptr;
+  // }
 
   if (gpu_sin_table) {
     cudaFree(gpu_sin_table);
