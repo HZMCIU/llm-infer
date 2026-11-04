@@ -18,6 +18,7 @@ foreach(test_src ${TEST_SOURCES})
     add_executable(${test_name} ${test_src})
     target_link_libraries(${test_name} PRIVATE GTest::gtest_main)
     target_link_libraries(${test_name} PRIVATE CUDA::cudart ${CUDA_cublas_LIBRARY})
+    target_link_libraries(${test_name} PRIVATE src_objects)
 endforeach()
 
 include(GoogleTest)
