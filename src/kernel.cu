@@ -58,7 +58,7 @@ __global__ void rmsNormKernel(__nv_bfloat16 *input, __nv_bfloat16 *output,
                               __nv_bfloat16 *model_norm_weight, int token_num) {
   __shared__ float rms_vector[1024];
   int workIdx = blockIdx.x * 2048 + threadIdx.x;
-  if (workIdx >= blockIdx.x * 2048) {
+  if (workIdx >= (blockIdx.x + 1) * 2048) {
     return;
   }
 

@@ -21,12 +21,79 @@ TEST(KernelTest, embedding) {
   cublasHandle_t cublas_handle;
   cublasStatus_t status = cublasCreate(&cublas_handle);
   EXPECT_EQ(status, CUBLAS_STATUS_SUCCESS) << "cuBLAS init failed, status: ";
-  // if (status != CUBLAS_STATUS_SUCCESS) {
-  //   std::cout << status << std::endl;
-  //   return 1;
-  // }
-
   Weights weights{};
   int ret = loadWeight(weights);
   EXPECT_EQ(0, ret);
+
+  vector<int> prompt_cpu = {128000, 128006};
+  int *prompt_gpu = nullptr;
+  CUDA_CHECK(cudaMalloc(&prompt_gpu, sizeof(int) * prompt_cpu.size()));
+  CUDA_CHECK(cudaMemcpy(prompt_gpu, prompt_cpu.data(),
+                        sizeof(int) * prompt_cpu.size(),
+                        cudaMemcpyHostToDevice));
+
+  vector<__nv_bfloat16> embedding_cpu(prompt_cpu.size() * EMBEDDING_LENGTH);
+  __nv_bfloat16 *embedding_gpu = nullptr;
+  CUDA_CHECK(
+      cudaMalloc(&embedding_gpu,
+                 sizeof(__nv_bfloat16) * prompt_cpu.size() * EMBEDDING_LENGTH));
+  CUDA_CHECK(
+      cudaMemcpy(embedding_gpu, embedding_cpu.data(),
+                 sizeof(__nv_bfloat16) * prompt_cpu.size() * EMBEDDING_LENGTH,
+                 cudaMemcpyHostToDevice));
+
+  embeddingGather(prompt_gpu, weights.embed_tokens, embedding_gpu, 2);
+
+  CUDA_CHECK(
+      cudaMemcpy(embedding_cpu.data(), embedding_gpu,
+                 sizeof(__nv_bfloat16) * prompt_cpu.size() * EMBEDDING_LENGTH,
+                 cudaMemcpyDeviceToHost));
+
+  for (int i = 0; i < prompt_cpu.size(); ++i) {
+    printf("token %d: %d\n", i, prompt_cpu[i]);
+    for (int j = 0; j < EMBEDDING_LENGTH; ++j) {
+      printf("%f ", float(embedding_cpu[i * EMBEDDING_LENGTH + j]));
+    }
+    printf("\n");
+  }
+
+  EXPECT_NE(float(embedding_cpu[0]), float(0));
+}
+
+TEST(KernelTest, rmsNorm) {
+  vector<__nv_bfloat16> input_cpu(EMBEDDING_LENGTH);
+  for (int i = 0; i < EMBEDDING_LENGTH; ++i) {
+    input_cpu[i] = (i % 32) + 1;
+    // printf("%f ", float(input_cpu[i]));
+  }
+  __nv_bfloat16 *input_gpu = nullptr;
+  CUDA_CHECK(cudaMalloc(&input_gpu, sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+  CUDA_CHECK(cudaMemcpy(input_gpu, input_cpu.data(),
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
+                        cudaMemcpyHostToDevice));
+
+  vector<__nv_bfloat16> output_cpu(EMBEDDING_LENGTH);
+  __nv_bfloat16 *output_gpu = nullptr;
+  CUDA_CHECK(cudaMalloc(&output_gpu, sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+
+  vector<__nv_bfloat16> weight_cpu(EMBEDDING_LENGTH);
+  for (int i = 0; i < EMBEDDING_LENGTH; ++i) {
+    weight_cpu[i] = (i % 32) + 1;
+    // printf("%f ", float(weight_cpu[i]));
+  }
+  __nv_bfloat16 *weight_gpu = nullptr;
+  CUDA_CHECK(cudaMalloc(&weight_gpu, sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+  CUDA_CHECK(cudaMemcpy(weight_gpu, weight_cpu.data(),
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
+                        cudaMemcpyHostToDevice));
+
+  rmsNorm(input_gpu, output_gpu, weight_gpu, 1);
+
+  CUDA_CHECK(cudaMemcpy(output_cpu.data(), output_gpu,
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
+                        cudaMemcpyDeviceToHost));
+
+  for (int i = 0; i < EMBEDDING_LENGTH; ++i) {
+    printf("%f ", float(output_cpu[i]));
+  }
 }
