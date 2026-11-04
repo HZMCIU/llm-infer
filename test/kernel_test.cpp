@@ -101,3 +101,65 @@ TEST(KernelTest, rmsNorm) {
 TEST(KernelTest, initRope) {
   init_rope_frequency(64, 2048, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
 }
+
+TEST(KernelTest, causalMask) {
+  int n = 10;
+  vector<__nv_bfloat16> input_cpu(n * n);
+  for (int i = 0; i < n * n; ++i) {
+    input_cpu[i] = i;
+  }
+
+  __nv_bfloat16 *input_gpu = nullptr;
+  CUDA_CHECK(cudaMalloc(&input_gpu, sizeof(__nv_bfloat16) * n * n));
+  CUDA_CHECK(cudaMemcpy(input_gpu, input_cpu.data(),
+                        sizeof(__nv_bfloat16) * n * n, cudaMemcpyHostToDevice));
+
+  causalMask(input_gpu, n);
+
+  CUDA_CHECK(cudaMemcpy(input_cpu.data(), input_gpu,
+                        sizeof(__nv_bfloat16) * n * n, cudaMemcpyDeviceToHost));
+
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < n; ++j) {
+      printf("%4.2f ", float(input_cpu[i * n + j]));
+    }
+    printf("\n");
+  }
+}
+
+TEST(KernelTest, softmax) {
+  int n = 10;
+  vector<__nv_bfloat16> input_cpu(n * n);
+  for (int i = 0; i < n * n; ++i) {
+    input_cpu[i] = i;
+  }
+
+  __nv_bfloat16 *input_gpu = nullptr;
+  CUDA_CHECK(cudaMalloc(&input_gpu, sizeof(__nv_bfloat16) * n * n));
+  CUDA_CHECK(cudaMemcpy(input_gpu, input_cpu.data(),
+                        sizeof(__nv_bfloat16) * n * n, cudaMemcpyHostToDevice));
+
+  causalMask(input_gpu, n);
+
+  CUDA_CHECK(cudaMemcpy(input_cpu.data(), input_gpu,
+                        sizeof(__nv_bfloat16) * n * n, cudaMemcpyDeviceToHost));
+
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < n; ++j) {
+      printf("%4.2f ", float(input_cpu[i * n + j]));
+    }
+    printf("\n");
+  }
+
+  softmax(input_gpu, n);
+
+  CUDA_CHECK(cudaMemcpy(input_cpu.data(), input_gpu,
+                        sizeof(__nv_bfloat16) * n * n, cudaMemcpyDeviceToHost));
+
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < n; ++j) {
+      printf("%.10f ", float(input_cpu[i * n + j]));
+    }
+    printf("\n");
+  }
+}

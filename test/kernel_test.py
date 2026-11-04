@@ -61,5 +61,26 @@ def test_init_rope_freq():
     return cos_table_1d, sin_table_1d
 
 
+def test_softmax():
+    n = 10
+    mat = np.arange(0, n * n).reshape(n, n)
+
+    def casual_mask(mat):
+        mask = np.triu(np.full((n, n), -np.inf), k=1)
+        mat = mask + mat
+        return mat
+
+    def softmax(x, axis=-1):
+        e = np.exp(x - x.max(axis=axis, keepdims=True))
+        return e / e.sum(axis=axis, keepdims=True)
+
+    mat = casual_mask(mat)
+    print(mat)
+    mat = softmax(mat)
+
+    return mat
+
+
 if __name__ == "__main__":
-    np.set_printoptions(suppress=True, threshold=1000, precision=10)
+    np.set_printoptions(suppress=True, threshold=1000, precision=2)
+    print(test_softmax())

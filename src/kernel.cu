@@ -316,13 +316,8 @@ __global__ void softmaxKernel(__nv_bfloat16 *input, int token_num) {
       float m_a = m[threadIdx.x];
       float d_a = d[threadIdx.x];
       float m_b = m[threadIdx.x + i];
-      float d_b = m[threadIdx.x + i];
+      float d_b = d[threadIdx.x + i];
 
-      // float m_new = fmaxf(m_a, m_b);
-      // float d_new = d_a * expf(m_a - m_new) + d_b * expf(m_b - m_new);
-      //
-      // m[threadIdx.x] = m_new;
-      // d[threadIdx.x] = d_new;
       float m_new = fmaxf(m_a, m_b);
       float d_new = 0.0f;
       if (d_a > 0.0f) {
@@ -331,6 +326,9 @@ __global__ void softmaxKernel(__nv_bfloat16 *input, int token_num) {
       if (d_b > 0.0f) {
         d_new += d_b * expf(m_b - m_new);
       }
+
+      m[threadIdx.x] = m_new;
+      d[threadIdx.x] = d_new;
     }
     __syncthreads();
   }

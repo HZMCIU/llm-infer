@@ -40,4 +40,4 @@ constexpr int MAX_SEQUENCES = BATCH_SIZE;
 
 constexpr float SQRT_HEAD_DIM = 8;
 
-#define WARP_FULL_MASK 0xffffffffffffffffULL
+#define WARP_FULL_MASK 0xffffffffULL
