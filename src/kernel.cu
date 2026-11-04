@@ -124,14 +124,6 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
     }
   }
 
-  // for (int i = 0; i < half_dim; ++i) {
-  //   printf("inv_freq_llama[%d]: %.30f\n", i, inv_freq_llama[i]);
-  // }
-
-  // CUDA_CHECK(cudaMalloc(&gpu_inv_freq, sizeof(float) * half_dim));
-  // CUDA_CHECK(cudaMemcpy(gpu_inv_freq, inv_freq_llama.data(),
-  //                       sizeof(float) * half_dim, cudaMemcpyHostToDevice));
-
   std::vector<float> cos_table(max_token_seq_num * head_dim);
   std::vector<float> sin_table(max_token_seq_num * head_dim);
 
@@ -168,11 +160,6 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
 }
 
 void free_rope_frequency() {
-  // if (gpu_inv_freq) {
-  //   cudaFree(gpu_inv_freq);
-  //   gpu_inv_freq = nullptr;
-  // }
-
   if (gpu_sin_table) {
     cudaFree(gpu_sin_table);
     gpu_sin_table = nullptr;

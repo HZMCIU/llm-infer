@@ -97,3 +97,7 @@ TEST(KernelTest, rmsNorm) {
     printf("%f ", float(output_cpu[i]));
   }
 }
+
+TEST(KernelTest, initRope) {
+  init_rope_frequency(64, 2048, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
+}
