@@ -26,3 +26,9 @@ set_target_properties(main PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(main PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 target_link_libraries(main PRIVATE CUDA::cudart ${CUDA_cublas_LIBRARY})
+
+
+include(CTest)
+if(BUILD_TESTING)
+  add_subdirectory(test)
+endif()
