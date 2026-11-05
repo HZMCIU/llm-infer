@@ -99,7 +99,7 @@ TEST(KernelTest, rmsNorm) {
 }
 
 TEST(KernelTest, initRope) {
-  init_rope_frequency(64, 2048, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
+  init_rope_frequency(64, 10, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
 }
 
 TEST(KernelTest, causalMask) {
@@ -161,5 +161,32 @@ TEST(KernelTest, softmax) {
       printf("%.10f ", float(input_cpu[i * n + j]));
     }
     printf("\n");
+  }
+}
+
+TEST(KernelTest, rope) {
+  int n = 10;
+  init_rope_frequency(64, 10, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
+  vector<__nv_bfloat16> input_cpu(n * EMBEDDING_LENGTH);
+  for (int i = 0; i < n * EMBEDDING_LENGTH; ++i) {
+    input_cpu[i] = (i % 32) + 1;
+  }
+  __nv_bfloat16 *input_gpu = nullptr;
+  CUDA_CHECK(
+      cudaMalloc(&input_gpu, n * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+  CUDA_CHECK(cudaMemcpy(input_gpu, input_cpu.data(),
+                        n * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
+                        cudaMemcpyHostToDevice));
+
+  rope(input_gpu, n, EMBEDDING_LENGTH);
+  CUDA_CHECK(cudaMemcpy(input_cpu.data(), input_gpu,
+                        n * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
+                        cudaMemcpyDeviceToHost));
+
+  for (int i = EMBEDDING_LENGTH; i < 2 * EMBEDDING_LENGTH; ++i) {
+    if (i % 6 == 0) {
+      printf("\n");
+    }
+    printf("%f ", float(input_cpu[i]));
   }
 }

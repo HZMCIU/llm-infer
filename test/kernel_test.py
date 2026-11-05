@@ -18,7 +18,7 @@ def test_rms_norm():
     return output
 
 
-def test_init_rope_freq():
+def test_init_rope_freq(max_seq_len):
     head_dim = 64
     half_dim = head_dim / 2
     inv_freq = np.arange(0, 64, 2)
@@ -46,7 +46,7 @@ def test_init_rope_freq():
         default=inv_freq,
     )
 
-    max_seq_len = 2048
+    # max_seq_len = 2048
 
     pos = np.arange(0, max_seq_len, dtype=np.float32)
 
@@ -58,7 +58,8 @@ def test_init_rope_freq():
     cos_table_1d = cos_table.ravel()
     sin_table_1d = sin_table.ravel()
 
-    return cos_table_1d, sin_table_1d
+    return cos_table, sin_table
+    # return cos_table_1d, sin_table_1d
 
 
 def test_softmax():
@@ -81,6 +82,30 @@ def test_softmax():
     return mat
 
 
+def test_rope():
+    n = 10
+    input = np.arange(0, n * 2048).reshape(n, 32, 64)
+    input = (input % 32) + 1
+    cos_table, sin_table = test_init_rope_freq(10)
+    cos_table = cos_table[:, None, 0::2]
+    sin_table = sin_table[:, None, 0::2]
+
+    cos_table = np.concatenate([cos_table, cos_table], axis=-1)
+    sin_table = np.concatenate([sin_table, sin_table], axis=-1)
+
+    def rotate_half(x):
+        x1, x2 = np.split(x, 2, axis=-1)
+        return np.concatenate([-x2, x1], axis=-1)
+
+    rot = rotate_half(input)
+
+    input = input * cos_table + rotate_half(input) * sin_table
+    input = input.reshape(n, 2048)
+    np.set_printoptions(suppress=True, threshold=1000)
+    print(input[1, 0:100])
+    return input
+
+
 if __name__ == "__main__":
-    np.set_printoptions(suppress=True, threshold=1000, precision=2)
-    print(test_softmax())
+    np.set_printoptions(suppress=True, threshold=1000)
+    test_rope()

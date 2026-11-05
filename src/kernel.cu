@@ -153,9 +153,12 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
 
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  // for (int i = 199 * head_dim; i < 200 * head_dim; ++i) {
-  //   printf("cos[%d]: %f\n", i, cos_table[i]);
-  //   printf("sin[%d]: %f\n", i, sin_table[i]);
+  // for (int i = 0; i < max_token_seq_num * head_dim; ++i) {
+  //   printf("%f ", cos_table[i]);
+  // }
+  // printf("\n\n");
+  // for (int i = 0; i < max_token_seq_num * head_dim; ++i) {
+  //   printf("%f ", sin_table[i]);
   // }
 }
 
@@ -201,14 +204,14 @@ __global__ void ropeKernel(__nv_bfloat16 *input, int head_dim, int proj_dim,
   input[idx2] = (__nv_bfloat16)(x1 * s + x2 * c);
 }
 
-void rope(__nv_bfloat16 *input, int proj_dim, int token_num) {
+void rope(__nv_bfloat16 *input, int token_num, int proj_dim) {
   int num_thread = proj_dim / 2;
-  if (num_thread > 2) {
+  if (num_thread > 1024) {
     std::cout << "max thread num in a block is 1024" << std::endl;
     return;
   }
 
-  ropeKernel<<<token_num, num_thread>>>(input, proj_dim, HEAD_DIM,
+  ropeKernel<<<token_num, num_thread>>>(input, HEAD_DIM, proj_dim,
                                         gpu_cos_table, gpu_sin_table);
 
   CUDA_CHECK(cudaDeviceSynchronize());
