@@ -2,6 +2,7 @@
 
 #include <format>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <string>
 
@@ -356,13 +357,43 @@ void TokenEmbedding(Weights &weights, TokenInfo &token_info,
                         cudaMemcpyDeviceToDevice));
 }
 
+// 1. 输出为人类可读的 .txt 文件 (如果指针在 GPU 上，自动拷回 CPU 并转 float)
+void dump_bf16_to_txt(const std::string &filename, const __nv_bfloat16 *d_ptr,
+                      size_t size, size_t cols = 4096,
+                      bool is_device_ptr = true) {
+  // 拷贝回 CPU
+  std::vector<__nv_bfloat16> h_bf16(size);
+  if (is_device_ptr) {
+    cudaDeviceSynchronize();
+    cudaMemcpy(h_bf16.data(), d_ptr, size * sizeof(__nv_bfloat16),
+               cudaMemcpyDeviceToHost);
+  } else {
+    std::copy(d_ptr, d_ptr + size, h_bf16.begin());
+  }
+
+  // 打开文件并设置不使用科学计数法
+  std::ofstream out(filename);
+  out << std::fixed << std::setprecision(6);
+
+  for (size_t i = 0; i < size; ++i) {
+    // 核心：使用 __bfloat162float 将 bf16 无损转为 float 再打印
+    float val = __bfloat162float(h_bf16[i]);
+    out << val;
+    if ((i + 1) % cols == 0 || i == size - 1) {
+      out << "\n";
+    } else {
+      out << " ";
+    }
+  }
+  out.close();
+}
+
 int Prefill_(Weights &weights, TokenInfo &token_info,
              LayerContext &layer_context) {
   std::vector<int> prompt = token_info.queue.front();
   int prompt_len = prompt.size();
 
   TokenEmbedding(weights, token_info, layer_context);
-
   init_rope_frequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,
                       8192);
 
@@ -419,7 +450,7 @@ int Prefill_(Weights &weights, TokenInfo &token_info,
     for (int i = 0; i < NUM_Q_HEADS; ++i) {
       int k_head_idx = i / GQA_Q_TO_K_RATIO;
       __nv_bfloat16 *q_head = layer_context.q_proj + i * HEAD_DIM;
-      __nv_bfloat16 *k_head = layer_context.v_proj + k_head_idx * HEAD_DIM;
+      __nv_bfloat16 *k_head = layer_context.k_proj + k_head_idx * HEAD_DIM;
       __nv_bfloat16 *attn_score_head =
           layer_context.attn_scores + prompt_len * prompt_len * i;
 
@@ -437,14 +468,14 @@ int Prefill_(Weights &weights, TokenInfo &token_info,
           CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
     }
 
-    causalMask(layer_context.attn_scores_v, prompt_len);
-    softmax(layer_context.attn_scores_v, prompt_len);
+    causalMask(layer_context.attn_scores, prompt_len);
+    softmax(layer_context.attn_scores, prompt_len);
 
     for (int i = 0; i < NUM_Q_HEADS; ++i) {
       int v_head_idx = i / GQA_ATTN_SCORES_TO_V_RATIO;
 
       __nv_bfloat16 *attn_scores_head =
-          layer_context.attn_scores_v + i * prompt_len * prompt_len;
+          layer_context.attn_scores + i * prompt_len * prompt_len;
       __nv_bfloat16 *v_head = layer_context.v_proj + v_head_idx * HEAD_DIM;
       __nv_bfloat16 *attn_scores_v_head =
           layer_context.attn_scores_v + i * HEAD_DIM;
@@ -480,6 +511,7 @@ int Prefill_(Weights &weights, TokenInfo &token_info,
                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
     residualAdd(layer_context.hidden_state, layer_context.o_proj, prompt_len);
+
     rmsNorm(layer_context.hidden_state, layer_context.input,
             weights.post_attn_layernorms[layer], prompt_len);
 
@@ -528,6 +560,12 @@ int Prefill_(Weights &weights, TokenInfo &token_info,
                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
     residualAdd(layer_context.hidden_state, layer_context.down, prompt_len);
+
+    if (layer == 0) {
+      dump_bf16_to_txt("/home/yuqyda/Data/cuda/llm-infer/test/a.txt",
+                       layer_context.hidden_state,
+                       prompt_len * EMBEDDING_LENGTH, EMBEDDING_LENGTH);
+    }
   }
 
   rmsNorm(layer_context.hidden_state, layer_context.input, weights.norm,
@@ -548,23 +586,10 @@ int Prefill_(Weights &weights, TokenInfo &token_info,
 
                    CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
-  std::vector<__nv_bfloat16> embed_proj_cpu(prompt_len * VOCAB_SIZE);
-  CUDA_CHECK(cudaMemcpy(embed_proj_cpu.data(), layer_context.embed_proj,
-                        sizeof(__nv_bfloat16) * VOCAB_SIZE * prompt_len,
+  std::vector<__nv_bfloat16> hidden_state_cpu(sizeof(__nv_bfloat16) *
+                                              EMBEDDING_LENGTH * prompt_len);
+  CUDA_CHECK(cudaMemcpy(hidden_state_cpu.data(), layer_context.hidden_state,
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * prompt_len,
                         cudaMemcpyDeviceToHost));
-
-  int last_token_offset = (prompt_len - 1) * VOCAB_SIZE;
-  float max_token = (float)embed_proj_cpu[last_token_offset];
-  int max_token_idx = 0;
-  for (int token_idx = 0; token_idx < VOCAB_SIZE; ++token_idx) {
-    if ((float)embed_proj_cpu[token_idx + last_token_offset] > max_token) {
-      max_token = embed_proj_cpu[token_idx + last_token_offset];
-      max_token_idx = token_idx;
-    }
-  }
-
-  std::cout << "Output token: " << (float)max_token
-            << ", token index: " << std::to_string(max_token_idx) << std::endl;
-
   return 0;
 }

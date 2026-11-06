@@ -153,11 +153,17 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
 
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  // for (int i = 0; i < max_token_seq_num * head_dim; ++i) {
+  // for (int i = 0; i < 20 * head_dim; ++i) {
+  //   if (i % head_dim == 0) {
+  //     printf("\n");
+  //   }
   //   printf("%f ", cos_table[i]);
   // }
   // printf("\n\n");
-  // for (int i = 0; i < max_token_seq_num * head_dim; ++i) {
+  // for (int i = 0; i < 20 * head_dim; ++i) {
+  //   if (i % head_dim == 0) {
+  //     printf("\n");
+  //   }
   //   printf("%f ", sin_table[i]);
   // }
 }
@@ -250,7 +256,8 @@ __global__ void residualAddKernel(__nv_bfloat16 *input,
   int work_idx = threadIdx.x + blockIdx.x * 2048;
 
   input[work_idx] = input[work_idx] + input_embed[work_idx];
-  input[work_idx + 1024] = input[work_idx] + input_embed[work_idx + 1024];
+  input[work_idx + 1024] =
+      input[work_idx + 1024] + input_embed[work_idx + 1024];
 }
 
 void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
@@ -261,12 +268,12 @@ void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
 }
 
 __global__ void siluKernel(__nv_bfloat16 *a, __nv_bfloat16 *b) {
-  int work_idx = blockIdx.x * 8196 + threadIdx.x;
+  int work_idx = blockIdx.x * 8192 + threadIdx.x;
 
-  for (int i = 0; i < 8196; i += 1024) {
+  for (int i = 0; i < 8192; i += 1024) {
     a[work_idx + i] =
         (__nv_bfloat16)((float)a[work_idx + i] *
-                            (1.0f / (1.0f + expf(-(float)a[work_idx + i]))) +
+                        (1.0f / (1.0f + expf(-(float)a[work_idx + i]))) *
                         (float)b[work_idx + i]);
   }
 }

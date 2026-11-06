@@ -104,8 +104,8 @@ TEST(ModelTest, prefill) {
   printf("\n\n");
 
   TokenInfo token_info;
-  token_info.queue.push({128000, 128006, 882, 128007, 271, 3923, 374, 220, 17,
-                         10, 17, 30, 128009, 128006, 78191, 128007, 271});
+  token_info.queue.push(
+      {128000, 3923, 374, 220, 17, 10, 17, 30, 128009, 128006, 78191, 128007});
   token_info.is_slot_free.resize(5, true);
   token_info.slot = 0;
   CUDA_CHECK(
