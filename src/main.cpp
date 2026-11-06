@@ -171,17 +171,18 @@ int main(int argc, char *argv[]) {
       continue;
     }
 
-    prefill(prompt, queue, prompt_len, is_slot_free, slot, input_tokens_gpu,
-            input_embeddings, weights, hidden_state, rms_norms, q_proj,
-            buf_2048_1, cublas_handle, q_proj_alpha, q_proj_beta, k_proj_alpha,
-            k_proj_beta, v_proj_alpha, v_proj_beta, prefill_attn_scores,
-            attn_alpha, attn_beta, attn_scores_v, attn_scores_v_alpha,
-            attn_scores_v_beta, o_proj, buf_2048_2, o_proj_alpha, o_proj_beta,
-            gate_alpha, gate_beta, gate, up_alpha, up_beta, up, down,
-            down_alpha, down_beta, embed_alpha, embed_beta, embed_proj,
-            embed_proj_cpu, generated_tokens, last_generated_tokens,
-            current_prompt_len, k_proj_temp_buf, v_proj_temp_buf, block_table,
-            block_table_gpu, free_blocks, kv_cache);
+    // prefill(prompt, queue, prompt_len, is_slot_free, slot, input_tokens_gpu,
+    //         input_embeddings, weights, hidden_state, rms_norms, q_proj,
+    //         buf_2048_1, cublas_handle, q_proj_alpha, q_proj_beta,
+    //         k_proj_alpha, k_proj_beta, v_proj_alpha, v_proj_beta,
+    //         prefill_attn_scores, attn_alpha, attn_beta, attn_scores_v,
+    //         attn_scores_v_alpha, attn_scores_v_beta, o_proj, buf_2048_2,
+    //         o_proj_alpha, o_proj_beta, gate_alpha, gate_beta, gate, up_alpha,
+    //         up_beta, up, down, down_alpha, down_beta, embed_alpha,
+    //         embed_beta, embed_proj, embed_proj_cpu, generated_tokens,
+    //         last_generated_tokens, current_prompt_len, k_proj_temp_buf,
+    //         v_proj_temp_buf, block_table, block_table_gpu, free_blocks,
+    //         kv_cache);
   }
 
   while (true) {
@@ -193,18 +194,19 @@ int main(int argc, char *argv[]) {
           continue;
         }
         generated_tokens[slot].clear();
-        prefill(prompt, queue, prompt_len, is_slot_free, slot, input_tokens_gpu,
-                input_embeddings, weights, hidden_state, rms_norms, q_proj,
-                buf_2048_1, cublas_handle, q_proj_alpha, q_proj_beta,
-                k_proj_alpha, k_proj_beta, v_proj_alpha, v_proj_beta,
-                prefill_attn_scores, attn_alpha, attn_beta, attn_scores_v,
-                attn_scores_v_alpha, attn_scores_v_beta, o_proj, buf_2048_2,
-                o_proj_alpha, o_proj_beta, gate_alpha, gate_beta, gate,
-                up_alpha, up_beta, up, down, down_alpha, down_beta, embed_alpha,
-                embed_beta, embed_proj, embed_proj_cpu, generated_tokens,
-                last_generated_tokens, current_prompt_len, k_proj_temp_buf,
-                v_proj_temp_buf, block_table, block_table_gpu, free_blocks,
-                kv_cache);
+        // prefill(prompt, queue, prompt_len, is_slot_free, slot,
+        // input_tokens_gpu,
+        //         input_embeddings, weights, hidden_state, rms_norms, q_proj,
+        //         buf_2048_1, cublas_handle, q_proj_alpha, q_proj_beta,
+        //         k_proj_alpha, k_proj_beta, v_proj_alpha, v_proj_beta,
+        //         prefill_attn_scores, attn_alpha, attn_beta, attn_scores_v,
+        //         attn_scores_v_alpha, attn_scores_v_beta, o_proj, buf_2048_2,
+        //         o_proj_alpha, o_proj_beta, gate_alpha, gate_beta, gate,
+        //         up_alpha, up_beta, up, down, down_alpha, down_beta,
+        //         embed_alpha, embed_beta, embed_proj, embed_proj_cpu,
+        //         generated_tokens, last_generated_tokens, current_prompt_len,
+        //         k_proj_temp_buf, v_proj_temp_buf, block_table,
+        //         block_table_gpu, free_blocks, kv_cache);
       }
       active_slots.push_back(slot);
       active_tokens.push_back(last_generated_tokens[slot]);
