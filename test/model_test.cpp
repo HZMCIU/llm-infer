@@ -95,7 +95,7 @@ TEST(ModelTest, matmul) {
   CUDA_CHECK(cudaFree(output_gpu));
 }
 
-TEST(ModelTest, prefill) {
+TEST(ModelTest, Prefill) {
   Weights weights{};
   int ret = loadWeight(weights);
 
@@ -173,7 +173,73 @@ TEST(ModelTest, prefill) {
   CUDA_CHECK(cudaMalloc(&layer_context.embed_proj,
                         sizeof(__nv_bfloat16) * VOCAB_SIZE * MAX_PROMPT_LEN));
 
-  Prefill_(weights, token_info, layer_context);
+  Prefill(weights, token_info, layer_context);
+}
+
+TEST(ModelTest, Decode) {
+  Weights weights{};
+  int ret = loadWeight(weights);
+
+  printf("after loads weight\n");
+  checkGPUStatus();
+  printf("\n\n");
+
+  TokenInfo token_info;
+  token_info.queue.push(
+      {128000, 3923, 374, 220, 17, 10, 17, 30, 128009, 128006, 78191, 128007});
+  token_info.is_slot_free.resize(5, true);
+  token_info.slot = 0;
+  CUDA_CHECK(
+      cudaMalloc(&token_info.input_token_gpu,
+                 sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
+
+  LayerContext layer_context;
+  cublasStatus_t status = cublasCreate(&layer_context.cublas_handle);
+
+  CUDA_CHECK(
+      cudaMalloc(&layer_context.input,
+                 sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(
+      cudaMalloc(&layer_context.hidden_state,
+                 sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(
+      cudaMalloc(&layer_context.attn_scores_v,
+                 sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(
+      cudaMalloc(&layer_context.attn_scores,
+                 sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(
+      cudaMalloc(&layer_context.q_proj,
+                 sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(cudaMalloc(&layer_context.k_proj,
+                        sizeof(__nv_bfloat16) * KV_DIM * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(cudaMalloc(&layer_context.v_proj,
+                        sizeof(__nv_bfloat16) * KV_DIM * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(cudaMalloc(&layer_context.o_proj,
+                        sizeof(__nv_bfloat16) * KV_DIM * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(cudaMalloc(&layer_context.gate,
+                        sizeof(__nv_bfloat16) * HIDDEN_DIM * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(cudaMalloc(&layer_context.up,
+                        sizeof(__nv_bfloat16) * HIDDEN_DIM * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(
+      cudaMalloc(&layer_context.down,
+                 sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
+
+  CUDA_CHECK(cudaMalloc(&layer_context.embed_proj,
+                        sizeof(__nv_bfloat16) * VOCAB_SIZE * MAX_PROMPT_LEN));
+
+  Prefill(weights, token_info, layer_context);
+  Decode(weights, token_info, layer_context);
 }
 
 TEST(ModelTest, loadWeight) {

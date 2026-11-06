@@ -166,5 +166,29 @@ def one_layer_compute():
         save_and_compare(layer0_final_out)
 
 
+def regressive_decode():
+    input_len = inputs["input_ids"].shape[1]  # 记录输入 Prompt 的 Token 长度
+    with torch.no_grad():
+        # max_new_tokens=10: 严格生成 10 个新 Token
+        # do_sample=False: 关闭随机采样，使用确定性的 argmax (Greedy Search)
+        generated_sequences = model.generate(
+            **inputs,
+            max_new_tokens=10,
+            min_new_tokens=10,  # 防止遇到 EOS 提前终止，强制生成满 10 个
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id
+        )
+    full_ids = generated_sequences[0].tolist()
+
+    new_10_token_ids = generated_sequences[0, input_len:].tolist()
+
+    print("新生成的 10 个 Token ID:", new_10_token_ids)
+    print(
+        "每个 ID 对应的单词     :",
+        [tokenizer.decode([tid]) for tid in new_10_token_ids],
+    )
+    print("拼接后的完整生成文本   :", repr(tokenizer.decode(new_10_token_ids)))
+
+
 if __name__ == "__main__":
-    compare_prefill_output()
+    regressive_decode()
