@@ -58,6 +58,10 @@ TEST(KernelTest, embedding) {
   }
 
   EXPECT_NE(float(embedding_cpu[0]), float(0));
+
+  CUDA_CHECK(cudaFree(prompt_gpu));
+  CUDA_CHECK(cudaFree(embedding_gpu));
+  // freeWeight(weights);
 }
 
 TEST(KernelTest, rmsNorm) {
@@ -96,6 +100,10 @@ TEST(KernelTest, rmsNorm) {
   for (int i = 0; i < EMBEDDING_LENGTH; ++i) {
     printf("%f ", float(output_cpu[i]));
   }
+
+  CUDA_CHECK(cudaFree(input_gpu));
+  CUDA_CHECK(cudaFree(output_gpu));
+  CUDA_CHECK(cudaFree(weight_gpu));
 }
 
 TEST(KernelTest, initRope) {
@@ -125,6 +133,8 @@ TEST(KernelTest, causalMask) {
     }
     printf("\n");
   }
+
+  CUDA_CHECK(cudaFree(input_gpu));
 }
 
 TEST(KernelTest, softmax) {
@@ -162,6 +172,8 @@ TEST(KernelTest, softmax) {
     }
     printf("\n");
   }
+
+  CUDA_CHECK(cudaFree(input_gpu));
 }
 
 TEST(KernelTest, rope) {
@@ -189,4 +201,5 @@ TEST(KernelTest, rope) {
     }
     printf("%f ", float(input_cpu[i]));
   }
+  CUDA_CHECK(cudaFree(input_gpu));
 }

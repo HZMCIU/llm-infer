@@ -1,6 +1,7 @@
 from safetensors import safe_open
 
 path = "/home/yuqyda/Data/cuda/models/LLM-Research--Llama-3.2-1B/snapshots/master/model.safetensors"
+# path = "/home/yuqyda/Data/cuda/models/qwen3-0.6b/model.safetensors"
 
 # dtype -> 每个元素占用的字节数
 DTYPE_SIZE = {

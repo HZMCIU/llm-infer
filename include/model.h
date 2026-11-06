@@ -22,7 +22,70 @@ struct Weights {
   __nv_bfloat16 *norm;
 };
 
+struct LayerContext {
+  cublasHandle_t cublas_handle;
+
+  __nv_bfloat16 *input;
+  __nv_bfloat16 *hidden_state;
+
+  __nv_bfloat16 *q_proj;
+  __nv_bfloat16 *k_proj;
+  __nv_bfloat16 *v_proj;
+
+  float q_proj_alpha = 1.0f;
+  float q_proj_beta = 0.0f;
+  float k_proj_alpha = 1.0f;
+  float k_proj_beta = 0.0f;
+  float v_proj_alpha = 1.0f;
+  float v_proj_beta = 0.0f;
+
+  __nv_bfloat16 *attn_scores;
+  __nv_bfloat16 *attn_scores_v;
+
+  float attn_alpha = 1.0f / 8.0f;
+  float attn_beta = 0.0f;
+  float attn_scores_v_alpha = 1.0f;
+  float attn_scores_v_beta = 0.0f;
+
+  __nv_bfloat16 *o_proj;
+
+  float o_proj_alpha = 1.0f;
+  float o_proj_beta = 0.0f;
+
+  __nv_bfloat16 *up;
+  __nv_bfloat16 *gate;
+  __nv_bfloat16 *down;
+
+  float gate_alpha = 1.0f;
+  float gate_beta = 0.0f;
+  float up_alpha = 1.0f;
+  float up_beta = 0.0f;
+  float down_alpha = 1.0f;
+  float down_beta = 0.0f;
+
+  __nv_bfloat16 *embed_proj;
+
+  float embed_alpha = 1.0f;
+  float embed_beta = 0.0f;
+};
+
+struct TokenInfo {
+  std::queue<std::vector<int>> queue;
+  int *input_token_gpu;
+  std::vector<bool> is_slot_free;
+  int slot;
+};
+
 int loadWeight(Weights &weights);
+
+void freeWeight(Weights &weights);
+
+void MatMulProj(cublasHandle_t &cublas_handle, __nv_bfloat16 *y,
+                __nv_bfloat16 *W, __nv_bfloat16 *x, int m, int n, int k,
+                float alpha, float beta);
+
+int Prefill_(Weights &weights, TokenInfo &token_info,
+             LayerContext &layer_context);
 
 void prefill(std::vector<int> &prompt, std::queue<std::vector<int>> &queue,
              int &prompt_len, std::vector<bool> &is_slot_free, int slot,
