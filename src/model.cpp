@@ -13,7 +13,7 @@
 
 using json = nlohmann::json;
 
-int loadWeight(Weights &weights) {
+int LoadWeight(Weights &weights) {
   if (checkGPUStatus() != 0) {
     return 1;
   }
@@ -117,7 +117,7 @@ int loadWeight(Weights &weights) {
   return 0;
 }
 
-void freeWeight(Weights &weights) {
+void FreeWeight(Weights &weights) {
   CUDA_CHECK(cudaFree(weights.embed_tokens));
   CUDA_CHECK(cudaFree(weights.norm));
 
@@ -141,7 +141,7 @@ void TokenEmbedding(Weights &weights, TokenInfo &token_info,
 
   CUDA_CHECK(cudaMemcpy(token_info.input_token_gpu, prompt.data(),
                         prompt_len * sizeof(int), cudaMemcpyHostToDevice));
-  embeddingGather(token_info.input_token_gpu, weights.embed_tokens,
+  EmbeddingGather(token_info.input_token_gpu, weights.embed_tokens,
                   layer_context.input, prompt_len);
   CUDA_CHECK(cudaMemcpy(layer_context.hidden_state, layer_context.input,
                         sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * prompt_len,
@@ -181,7 +181,7 @@ void DumpBf16ToTxt(const std::string &filename, const __nv_bfloat16 *d_ptr,
 void LayeredCompute(Weights &weights, TokenInfo &token_info,
                     LayerContext &layer_context, int prompt_len) {
   for (int layer = 0; layer < N_LAYERS; ++layer) {
-    rmsNorm(layer_context.hidden_state, layer_context.input,
+    RmsNorm(layer_context.hidden_state, layer_context.input,
             weights.input_layernorm[layer], prompt_len);
 
     cublasStatus_t q_proj_staus =
@@ -227,8 +227,8 @@ void LayeredCompute(Weights &weights, TokenInfo &token_info,
 
         CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
-    rope(layer_context.q_proj, prompt_len, EMBEDDING_LENGTH);
-    rope(layer_context.k_proj, prompt_len, KV_DIM);
+    Rope(layer_context.q_proj, prompt_len, EMBEDDING_LENGTH);
+    Rope(layer_context.k_proj, prompt_len, KV_DIM);
 
     for (int i = 0; i < NUM_Q_HEADS; ++i) {
       int k_head_idx = i / GQA_Q_TO_K_RATIO;
@@ -251,8 +251,8 @@ void LayeredCompute(Weights &weights, TokenInfo &token_info,
           CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
     }
 
-    causalMask(layer_context.attn_scores, prompt_len);
-    softmax(layer_context.attn_scores, prompt_len);
+    CausalMask(layer_context.attn_scores, prompt_len);
+    Softmax(layer_context.attn_scores, prompt_len);
 
     for (int i = 0; i < NUM_Q_HEADS; ++i) {
       int v_head_idx = i / GQA_ATTN_SCORES_TO_V_RATIO;
@@ -293,9 +293,9 @@ void LayeredCompute(Weights &weights, TokenInfo &token_info,
 
                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
-    residualAdd(layer_context.hidden_state, layer_context.o_proj, prompt_len);
+    ResidualAdd(layer_context.hidden_state, layer_context.o_proj, prompt_len);
 
-    rmsNorm(layer_context.hidden_state, layer_context.input,
+    RmsNorm(layer_context.hidden_state, layer_context.input,
             weights.post_attn_layernorms[layer], prompt_len);
 
     cublasStatus_t gate_status = cublasGemmEx(
@@ -326,7 +326,7 @@ void LayeredCompute(Weights &weights, TokenInfo &token_info,
 
         CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
-    silu(layer_context.gate, layer_context.up, prompt_len);
+    Silu(layer_context.gate, layer_context.up, prompt_len);
 
     cublasStatus_t down_status =
         cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
@@ -342,10 +342,10 @@ void LayeredCompute(Weights &weights, TokenInfo &token_info,
 
                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
-    residualAdd(layer_context.hidden_state, layer_context.down, prompt_len);
+    ResidualAdd(layer_context.hidden_state, layer_context.down, prompt_len);
   }
 
-  rmsNorm(layer_context.hidden_state, layer_context.input, weights.norm,
+  RmsNorm(layer_context.hidden_state, layer_context.input, weights.norm,
           prompt_len);
 
   cublasStatus_t embed_status =
@@ -393,8 +393,7 @@ int Prefill(Weights &weights, TokenInfo &token_info,
   int prompt_len = prompt.size();
 
   TokenEmbedding(weights, token_info, layer_context);
-  init_rope_frequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,
-                      8192);
+  InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
   LayeredCompute(weights, token_info, layer_context, prompt_len);
 
   int max_token_idx =
@@ -412,8 +411,8 @@ int Decode(Weights &weights, TokenInfo &token_info,
     printf("prompt_len: %d\n", prompt_len);
 
     TokenEmbedding(weights, token_info, layer_context);
-    init_rope_frequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,
-                        8192);
+    InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,
+                      8192);
     LayeredCompute(weights, token_info, layer_context, prompt_len);
 
     int max_token_idx =

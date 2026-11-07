@@ -8,7 +8,7 @@
 float *gpu_cos_table = nullptr;
 float *gpu_sin_table = nullptr;
 
-__global__ void embeddingGatherKernel(int *input_token,
+__global__ void EmbeddingGatherKernel(int *input_token,
                                       __nv_bfloat16 *model_token_embedding,
                                       __nv_bfloat16 *input_token_embedding,
                                       int input_token_num) {
@@ -24,17 +24,17 @@ __global__ void embeddingGatherKernel(int *input_token,
                             1024];
 }
 
-void embeddingGather(int *input_token, __nv_bfloat16 *model_token_embedding,
+void EmbeddingGather(int *input_token, __nv_bfloat16 *model_token_embedding,
                      __nv_bfloat16 *input_token_embedding,
                      int input_token_num) {
-  embeddingGatherKernel<<<input_token_num, 1024>>>(
+  EmbeddingGatherKernel<<<input_token_num, 1024>>>(
       input_token, model_token_embedding, input_token_embedding,
       input_token_num);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void embeddingGatherDecodeKernel(int *last_tokens_gpu, int token_num,
+__global__ void EmbeddingGatherDecodeKernel(int *last_tokens_gpu, int token_num,
                                             __nv_bfloat16 *output,
                                             __nv_bfloat16 *embed_tokens) {
   int input_token = last_tokens_gpu[blockIdx.x];
@@ -46,15 +46,15 @@ __global__ void embeddingGatherDecodeKernel(int *last_tokens_gpu, int token_num,
   }
 }
 
-void embeddingGatherDecode(int *last_token_gpu, int token_num,
+void EmbeddingGatherDecode(int *last_token_gpu, int token_num,
                            __nv_bfloat16 *output, __nv_bfloat16 *embed_tokens) {
-  embeddingGatherDecodeKernel<<<token_num, 1024>>>(last_token_gpu, token_num,
+  EmbeddingGatherDecodeKernel<<<token_num, 1024>>>(last_token_gpu, token_num,
                                                    output, embed_tokens);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void rmsNormKernel(__nv_bfloat16 *input, __nv_bfloat16 *output,
+__global__ void RmsNormKernel(__nv_bfloat16 *input, __nv_bfloat16 *output,
                               __nv_bfloat16 *model_norm_weight, int token_num) {
   __shared__ float rms_vector[1024];
   int workIdx = blockIdx.x * 2048 + threadIdx.x;
@@ -89,16 +89,16 @@ __global__ void rmsNormKernel(__nv_bfloat16 *input, __nv_bfloat16 *output,
                       (float)model_norm_weight[threadIdx.x + 1024]);
 }
 
-void rmsNorm(__nv_bfloat16 *input, __nv_bfloat16 *output,
+void RmsNorm(__nv_bfloat16 *input, __nv_bfloat16 *output,
              __nv_bfloat16 *norm_weight, int token_num) {
-  rmsNormKernel<<<token_num, 1024>>>(input, output, norm_weight, token_num);
+  RmsNormKernel<<<token_num, 1024>>>(input, output, norm_weight, token_num);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
-                         float factor, float low_freq_factor,
-                         float high_freq_factor, int max_hidden_dimension) {
+void InitRopeFrequency(int head_dim, int max_token_seq_num, float rope_theta,
+                       float factor, float low_freq_factor,
+                       float high_freq_factor, int max_hidden_dimension) {
   int half_dim = head_dim / 2;
   std::vector<float> inv_freq(half_dim);
   for (int i = 0; i < half_dim; i++) {
@@ -168,7 +168,7 @@ void init_rope_frequency(int head_dim, int max_token_seq_num, float rope_theta,
   // }
 }
 
-void free_rope_frequency() {
+void FreeRopeFrequency() {
   if (gpu_sin_table) {
     cudaFree(gpu_sin_table);
     gpu_sin_table = nullptr;
@@ -180,7 +180,7 @@ void free_rope_frequency() {
   }
 }
 
-__global__ void ropeKernel(__nv_bfloat16 *input, int head_dim, int proj_dim,
+__global__ void RopeKernel(__nv_bfloat16 *input, int head_dim, int proj_dim,
                            float *gpu_cos_table, float *gpu_sin_table) {
   int half_dim = head_dim / 2;
   int half_proj = proj_dim / 2;
@@ -210,20 +210,20 @@ __global__ void ropeKernel(__nv_bfloat16 *input, int head_dim, int proj_dim,
   input[idx2] = (__nv_bfloat16)(x1 * s + x2 * c);
 }
 
-void rope(__nv_bfloat16 *input, int token_num, int proj_dim) {
+void Rope(__nv_bfloat16 *input, int token_num, int proj_dim) {
   int num_thread = proj_dim / 2;
   if (num_thread > 1024) {
     std::cout << "max thread num in a block is 1024" << std::endl;
     return;
   }
 
-  ropeKernel<<<token_num, num_thread>>>(input, HEAD_DIM, proj_dim,
+  RopeKernel<<<token_num, num_thread>>>(input, HEAD_DIM, proj_dim,
                                         gpu_cos_table, gpu_sin_table);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void ropeDecodeKernel(__nv_bfloat16 *input, int position_in_sequence,
+__global__ void RopeDecodeKernel(__nv_bfloat16 *input, int position_in_sequence,
                                  int proj_dim) {
   if (2 * threadIdx.x + 1 < proj_dim) {
     int double_i = 2 * (threadIdx.x % 32);
@@ -240,18 +240,18 @@ __global__ void ropeDecodeKernel(__nv_bfloat16 *input, int position_in_sequence,
   }
 }
 
-void ropeDecode(__nv_bfloat16 *input, int position_in_sequence, int proj_dim) {
+void RopeDecode(__nv_bfloat16 *input, int position_in_sequence, int proj_dim) {
   int thread_num = proj_dim / 2;
   if (thread_num > 1024) {
     return;
   }
 
-  ropeDecodeKernel<<<1, thread_num>>>(input, position_in_sequence, proj_dim);
+  RopeDecodeKernel<<<1, thread_num>>>(input, position_in_sequence, proj_dim);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void residualAddKernel(__nv_bfloat16 *input,
+__global__ void ResidualAddKernel(__nv_bfloat16 *input,
                                   __nv_bfloat16 *input_embed) {
   int work_idx = threadIdx.x + blockIdx.x * 2048;
 
@@ -260,14 +260,14 @@ __global__ void residualAddKernel(__nv_bfloat16 *input,
       input[work_idx + 1024] + input_embed[work_idx + 1024];
 }
 
-void residualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
+void ResidualAdd(__nv_bfloat16 *input, __nv_bfloat16 *input_embed,
                  int token_num) {
-  residualAddKernel<<<token_num, 1024>>>(input, input_embed);
+  ResidualAddKernel<<<token_num, 1024>>>(input, input_embed);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void siluKernel(__nv_bfloat16 *a, __nv_bfloat16 *b) {
+__global__ void SiluKernel(__nv_bfloat16 *a, __nv_bfloat16 *b) {
   int work_idx = blockIdx.x * 8192 + threadIdx.x;
 
   for (int i = 0; i < 8192; i += 1024) {
@@ -278,13 +278,13 @@ __global__ void siluKernel(__nv_bfloat16 *a, __nv_bfloat16 *b) {
   }
 }
 
-void silu(__nv_bfloat16 *a, __nv_bfloat16 *b, int token_num) {
-  siluKernel<<<token_num, 1024>>>(a, b);
+void Silu(__nv_bfloat16 *a, __nv_bfloat16 *b, int token_num) {
+  SiluKernel<<<token_num, 1024>>>(a, b);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void causalMaskKernel(__nv_bfloat16 *input, int token_num) {
+__global__ void CausalMaskKernel(__nv_bfloat16 *input, int token_num) {
   if (threadIdx.x + blockIdx.x * blockDim.x >=
       token_num * token_num * NUM_Q_HEADS) {
     return;
@@ -297,18 +297,18 @@ __global__ void causalMaskKernel(__nv_bfloat16 *input, int token_num) {
   }
 }
 
-void causalMask(__nv_bfloat16 *input, int token_num) {
+void CausalMask(__nv_bfloat16 *input, int token_num) {
   if (token_num > 1024) {
     std::cout << "cannot launch more than 1024 threads" << std::endl;
     return;
   }
 
-  causalMaskKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
+  CausalMaskKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void softmaxKernel(__nv_bfloat16 *input, int token_num) {
+__global__ void SoftmaxKernel(__nv_bfloat16 *input, int token_num) {
   __shared__ float m[1024];
   __shared__ float d[1024];
 
@@ -347,18 +347,18 @@ __global__ void softmaxKernel(__nv_bfloat16 *input, int token_num) {
       masked ? (__nv_bfloat16)0.0f : (__nv_bfloat16)(expf(token - m[0]) / d[0]);
 }
 
-void softmax(__nv_bfloat16 *input, int token_num) {
+void Softmax(__nv_bfloat16 *input, int token_num) {
   if (token_num > 1024) {
     std::cout << "cannot launch more than 1024 kernel" << std::endl;
     return;
   }
 
-  softmaxKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
+  SoftmaxKernel<<<token_num * NUM_Q_HEADS, token_num>>>(input, token_num);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void softmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
+__global__ void SoftmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
   __shared__ float m[1024];
   __shared__ float d[1024];
 
@@ -397,16 +397,16 @@ __global__ void softmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
   input[workIndex] = (__nv_bfloat16)(expf(token - m[0]) / d[0]);
 }
 
-void softmaxDecode(__nv_bfloat16 *input, int seq_len) {
+void SoftmaxDecode(__nv_bfloat16 *input, int seq_len) {
   if (seq_len > 1024) {
     return;
   }
-  softmaxDecodeKernel<<<NUM_Q_HEADS, seq_len>>>(input, seq_len);
+  SoftmaxDecodeKernel<<<NUM_Q_HEADS, seq_len>>>(input, seq_len);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void pagedAttentionKernel(int layer, int active_slot_num,
+__global__ void PagedAttentionKernel(int layer, int active_slot_num,
                                      __nv_bfloat16 *q_proj,
                                      __nv_bfloat16 *kv_cache,
                                      int *block_table_gpu, int *seq_lens_gpu,
@@ -481,11 +481,11 @@ __global__ void pagedAttentionKernel(int layer, int active_slot_num,
       acc / d;
 }
 
-void pagedAttention(int layer, int active_slot_num, __nv_bfloat16 *q_proj,
+void PagedAttention(int layer, int active_slot_num, __nv_bfloat16 *q_proj,
                     __nv_bfloat16 *kv_cache, int *block_table_gpu,
                     int *seq_lens_gpu, int *active_slots_gpu,
                     __nv_bfloat16 *output) {
-  pagedAttentionKernel<<<dim3(active_slot_num, NUM_Q_HEADS), HEAD_DIM>>>(
+  PagedAttentionKernel<<<dim3(active_slot_num, NUM_Q_HEADS), HEAD_DIM>>>(
       layer, active_slot_num, q_proj, kv_cache, block_table_gpu, seq_lens_gpu,
       active_slots_gpu, output);
 

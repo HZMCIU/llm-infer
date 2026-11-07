@@ -25,12 +25,11 @@ int main(int argc, char *argv[]) {
   }
 
   Weights weights{};
-  if (loadWeight(weights) != 0) {
+  if (LoadWeight(weights) != 0) {
     return 1;
   }
 
-  init_rope_frequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,
-                      8192);
+  InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
 
   __nv_bfloat16 *kv_cache;
   CUDA_CHECK(cudaMalloc(&kv_cache, KV_CACHE_SIZE_BYTES));
@@ -231,11 +230,11 @@ int main(int argc, char *argv[]) {
     }
     cudaMemcpy(seq_lens_gpu, seq_lens.data(), seq_lens.size() * sizeof(int),
                cudaMemcpyHostToDevice);
-    embeddingGatherDecode(last_tokens_gpu, active_slot_num, hidden_state,
+    EmbeddingGatherDecode(last_tokens_gpu, active_slot_num, hidden_state,
                           weights.embed_tokens);
 
     for (int layer = 0; layer < N_LAYERS; ++layer) {
-      rmsNorm(hidden_state, rms_norms, weights.input_layernorm[layer],
+      RmsNorm(hidden_state, rms_norms, weights.input_layernorm[layer],
               active_slot_num);
       q_proj = buf_2048_1;
       // q proj (num_prompts, 2048)
@@ -285,9 +284,9 @@ int main(int argc, char *argv[]) {
 
       for (int slot = 0; slot < active_slot_num; ++slot) {
         int active_slot = active_slots[slot];
-        ropeDecode(&q_proj[slot * EMBEDDING_LENGTH],
+        RopeDecode(&q_proj[slot * EMBEDDING_LENGTH],
                    current_prompt_len[active_slot], EMBEDDING_LENGTH);
-        ropeDecode(k_proj_batched_buffer + slot * KV_DIM,
+        RopeDecode(k_proj_batched_buffer + slot * KV_DIM,
                    current_prompt_len[active_slot], KV_DIM);
       }
 
@@ -327,7 +326,7 @@ int main(int argc, char *argv[]) {
                  MAX_SEQUENCES * N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int),
                  cudaMemcpyHostToDevice);
 
-      pagedAttention(layer, active_slot_num, q_proj, kv_cache, block_table_gpu,
+      PagedAttention(layer, active_slot_num, q_proj, kv_cache, block_table_gpu,
                      seq_lens_gpu, active_slots_gpu, buf_2048_1);
 
       o_proj = buf_2048_2;
@@ -339,9 +338,9 @@ int main(int argc, char *argv[]) {
                    o_proj, CUDA_R_16BF, EMBEDDING_LENGTH, CUBLAS_COMPUTE_32F,
                    CUBLAS_GEMM_DEFAULT);
 
-      residualAdd(hidden_state, o_proj, active_slot_num);
+      ResidualAdd(hidden_state, o_proj, active_slot_num);
 
-      rmsNorm(hidden_state, rms_norms, weights.post_attn_layernorms[layer],
+      RmsNorm(hidden_state, rms_norms, weights.post_attn_layernorms[layer],
               active_slot_num);
 
       cublasGemmEx(cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N, HIDDEN_DIM,
@@ -360,7 +359,7 @@ int main(int argc, char *argv[]) {
                    &up_beta, up, CUDA_R_16BF, HIDDEN_DIM, CUBLAS_COMPUTE_32F,
                    CUBLAS_GEMM_DEFAULT);
 
-      silu(gate, up, active_slot_num);
+      Silu(gate, up, active_slot_num);
 
       down = buf_2048_2;
       cublasGemmEx(cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N, EMBEDDING_LENGTH,
@@ -369,10 +368,10 @@ int main(int argc, char *argv[]) {
                    CUDA_R_16BF, HIDDEN_DIM, &down_beta, down, CUDA_R_16BF,
                    EMBEDDING_LENGTH, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
-      residualAdd(hidden_state, down, active_slot_num);
+      ResidualAdd(hidden_state, down, active_slot_num);
     }
 
-    rmsNorm(hidden_state, rms_norms, weights.norm, active_slot_num);
+    RmsNorm(hidden_state, rms_norms, weights.norm, active_slot_num);
 
     cublasGemmEx(cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N, VOCAB_SIZE,
                  active_slot_num, EMBEDDING_LENGTH, &embed_alpha,

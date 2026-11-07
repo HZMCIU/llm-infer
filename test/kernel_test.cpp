@@ -17,12 +17,12 @@
 
 using namespace std;
 
-TEST(KernelTest, embedding) {
+TEST(KernelTest, Embedding) {
   cublasHandle_t cublas_handle;
   cublasStatus_t status = cublasCreate(&cublas_handle);
   EXPECT_EQ(status, CUBLAS_STATUS_SUCCESS) << "cuBLAS init failed, status: ";
   Weights weights{};
-  int ret = loadWeight(weights);
+  int ret = LoadWeight(weights);
   EXPECT_EQ(0, ret);
 
   vector<int> prompt_cpu = {128000, 128006};
@@ -42,7 +42,7 @@ TEST(KernelTest, embedding) {
                  sizeof(__nv_bfloat16) * prompt_cpu.size() * EMBEDDING_LENGTH,
                  cudaMemcpyHostToDevice));
 
-  embeddingGather(prompt_gpu, weights.embed_tokens, embedding_gpu, 2);
+  EmbeddingGather(prompt_gpu, weights.embed_tokens, embedding_gpu, 2);
 
   CUDA_CHECK(
       cudaMemcpy(embedding_cpu.data(), embedding_gpu,
@@ -64,7 +64,7 @@ TEST(KernelTest, embedding) {
   // freeWeight(weights);
 }
 
-TEST(KernelTest, rmsNorm) {
+TEST(KernelTest, RmsNorm) {
   vector<__nv_bfloat16> input_cpu(EMBEDDING_LENGTH);
   for (int i = 0; i < EMBEDDING_LENGTH; ++i) {
     input_cpu[i] = (i % 32) + 1;
@@ -91,7 +91,7 @@ TEST(KernelTest, rmsNorm) {
                         sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
                         cudaMemcpyHostToDevice));
 
-  rmsNorm(input_gpu, output_gpu, weight_gpu, 1);
+  RmsNorm(input_gpu, output_gpu, weight_gpu, 1);
 
   CUDA_CHECK(cudaMemcpy(output_cpu.data(), output_gpu,
                         sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
@@ -106,11 +106,11 @@ TEST(KernelTest, rmsNorm) {
   CUDA_CHECK(cudaFree(weight_gpu));
 }
 
-TEST(KernelTest, initRope) {
-  init_rope_frequency(64, 10, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
+TEST(KernelTest, InitRope) {
+  InitRopeFrequency(64, 10, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
 }
 
-TEST(KernelTest, causalMask) {
+TEST(KernelTest, CausalMask) {
   int n = 10;
   vector<__nv_bfloat16> input_cpu(n * n);
   for (int i = 0; i < n * n; ++i) {
@@ -122,7 +122,7 @@ TEST(KernelTest, causalMask) {
   CUDA_CHECK(cudaMemcpy(input_gpu, input_cpu.data(),
                         sizeof(__nv_bfloat16) * n * n, cudaMemcpyHostToDevice));
 
-  causalMask(input_gpu, n);
+  CausalMask(input_gpu, n);
 
   CUDA_CHECK(cudaMemcpy(input_cpu.data(), input_gpu,
                         sizeof(__nv_bfloat16) * n * n, cudaMemcpyDeviceToHost));
@@ -137,7 +137,7 @@ TEST(KernelTest, causalMask) {
   CUDA_CHECK(cudaFree(input_gpu));
 }
 
-TEST(KernelTest, softmax) {
+TEST(KernelTest, Softmax) {
   int n = 10;
   vector<__nv_bfloat16> input_cpu(n * n);
   for (int i = 0; i < n * n; ++i) {
@@ -149,7 +149,7 @@ TEST(KernelTest, softmax) {
   CUDA_CHECK(cudaMemcpy(input_gpu, input_cpu.data(),
                         sizeof(__nv_bfloat16) * n * n, cudaMemcpyHostToDevice));
 
-  causalMask(input_gpu, n);
+  CausalMask(input_gpu, n);
 
   CUDA_CHECK(cudaMemcpy(input_cpu.data(), input_gpu,
                         sizeof(__nv_bfloat16) * n * n, cudaMemcpyDeviceToHost));
@@ -161,7 +161,7 @@ TEST(KernelTest, softmax) {
     printf("\n");
   }
 
-  softmax(input_gpu, n);
+  Softmax(input_gpu, n);
 
   CUDA_CHECK(cudaMemcpy(input_cpu.data(), input_gpu,
                         sizeof(__nv_bfloat16) * n * n, cudaMemcpyDeviceToHost));
@@ -176,9 +176,9 @@ TEST(KernelTest, softmax) {
   CUDA_CHECK(cudaFree(input_gpu));
 }
 
-TEST(KernelTest, rope) {
+TEST(KernelTest, Rope) {
   int n = 10;
-  init_rope_frequency(64, 10, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
+  InitRopeFrequency(64, 10, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
   vector<__nv_bfloat16> input_cpu(n * EMBEDDING_LENGTH);
   for (int i = 0; i < n * EMBEDDING_LENGTH; ++i) {
     input_cpu[i] = (i % 32) + 1;
@@ -190,7 +190,7 @@ TEST(KernelTest, rope) {
                         n * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
                         cudaMemcpyHostToDevice));
 
-  rope(input_gpu, n, EMBEDDING_LENGTH);
+  Rope(input_gpu, n, EMBEDDING_LENGTH);
   CUDA_CHECK(cudaMemcpy(input_cpu.data(), input_gpu,
                         n * sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
                         cudaMemcpyDeviceToHost));

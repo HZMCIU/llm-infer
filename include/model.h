@@ -79,13 +79,9 @@ struct TokenInfo {
   std::vector<std::vector<int>> generated_tokens;
 };
 
-int loadWeight(Weights &weights);
+int LoadWeight(Weights &weights);
 
-void freeWeight(Weights &weights);
-
-void MatMulProj(cublasHandle_t &cublas_handle, __nv_bfloat16 *y,
-                __nv_bfloat16 *W, __nv_bfloat16 *x, int m, int n, int k,
-                float alpha, float beta);
+void FreeWeight(Weights &weights);
 
 int Prefill(Weights &weights, TokenInfo &token_info,
             LayerContext &layer_context);

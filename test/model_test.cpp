@@ -17,7 +17,7 @@
 
 using namespace std;
 
-TEST(ModelTest, matmul) {
+TEST(ModelTest, Matmul) {
   vector<__nv_bfloat16> weight_cpu(EMBEDDING_LENGTH * EMBEDDING_LENGTH);
   for (int i = 0; i < EMBEDDING_LENGTH * EMBEDDING_LENGTH; ++i) {
     weight_cpu[i] = (i % 32) + 1;
@@ -97,7 +97,7 @@ TEST(ModelTest, matmul) {
 
 TEST(ModelTest, Prefill) {
   Weights weights{};
-  int ret = loadWeight(weights);
+  int ret = LoadWeight(weights);
 
   printf("after loads weight\n");
   checkGPUStatus();
@@ -178,7 +178,7 @@ TEST(ModelTest, Prefill) {
 
 TEST(ModelTest, Decode) {
   Weights weights{};
-  int ret = loadWeight(weights);
+  int ret = LoadWeight(weights);
 
   printf("after loads weight\n");
   checkGPUStatus();
@@ -244,5 +244,5 @@ TEST(ModelTest, Decode) {
 
 TEST(ModelTest, loadWeight) {
   Weights weights{};
-  int ret = loadWeight(weights);
+  int ret = LoadWeight(weights);
 }
