@@ -13,7 +13,7 @@
 #include "helper.h"
 #include "json.hpp"
 #include "kernel.cuh"
-#include "model.h"
+#include "nn.h"
 
 using namespace std;
 

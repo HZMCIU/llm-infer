@@ -1,4 +1,4 @@
-#include "model.h"
+#include "nn.h"
 
 #include <format>
 #include <fstream>
