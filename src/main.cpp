@@ -81,7 +81,8 @@ int main(int argc, char *argv[]) {
   std::string dir_path = "/home/yuqyda/Data/cuda/models/Llama-3.2-1B-Instruct";
   tokenizer.BuildTokenizer(dir_path);
 
-  std::string input = "the key of life is";
+  std::string input;
+  std::getline(std::cin, input);
   std::string user_prompt = tokenizer.RenderPrompt(input);
 
   std::vector<int> tokens;
@@ -95,8 +96,11 @@ int main(int argc, char *argv[]) {
       cudaMalloc(&token_info.input_token_gpu,
                  sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
 
+  Sampler sampler;
+  sampler.BuildSampler(0.8, 0.92, 30, 1234);
+
   Prefill(weights, token_info, layer_context);
-  Decode(weights, token_info, layer_context);
+  Decode(weights, token_info, layer_context, sampler);
 
   std::vector<int> prompt = token_info.queue.front();
 

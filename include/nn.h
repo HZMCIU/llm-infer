@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "const.h"
+#include "sampler.h"
 
 struct Weights {
   __nv_bfloat16 *embed_tokens;
@@ -86,5 +87,5 @@ void FreeWeight(Weights &weights);
 int Prefill(Weights &weights, TokenInfo &token_info,
             LayerContext &layer_context);
 
-int Decode(Weights &weights, TokenInfo &token_info,
-           LayerContext &layer_context);
+int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
+           Sampler &sampler);

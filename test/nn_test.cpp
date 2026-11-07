@@ -14,6 +14,7 @@
 #include "json.hpp"
 #include "kernel.cuh"
 #include "nn.h"
+#include "sampler.h"
 
 using namespace std;
 
@@ -243,8 +244,11 @@ TEST(NNTest, Decode) {
   CUDA_CHECK(cudaMalloc(&layer_context.embed_proj,
                         sizeof(__nv_bfloat16) * VOCAB_SIZE * MAX_PROMPT_LEN));
 
+  Sampler sampler;
+  sampler.BuildSampler(0.8, 0.92, 30, 1234);
+
   Prefill(weights, token_info, layer_context);
-  Decode(weights, token_info, layer_context);
+  Decode(weights, token_info, layer_context, sampler);
 
   std::vector<int> &prompt = token_info.queue.front();
   printf("[");

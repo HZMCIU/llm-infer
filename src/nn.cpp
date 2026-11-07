@@ -402,8 +402,11 @@ int Prefill(Weights &weights, TokenInfo &token_info,
   return 0;
 }
 
-int Decode(Weights &weights, TokenInfo &token_info,
-           LayerContext &layer_context) {
+int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
+           Sampler &sampler) {
+  std::vector<__nv_bfloat16> logits_bf16(VOCAB_SIZE);
+  std::vector<float> logits_f32(VOCAB_SIZE);
+
   for (int i = 0; i < 200; ++i) {
     std::vector<int> &prompt = token_info.queue.front();
     int prompt_len = prompt.size();
@@ -414,10 +417,19 @@ int Decode(Weights &weights, TokenInfo &token_info,
                       8192);
     LayeredCompute(weights, token_info, layer_context, prompt_len);
 
-    int max_token_idx =
+    CUDA_CHECK(cudaMemcpy(
+        logits_bf16.data(), layer_context.embed_proj + prompt_len * VOCAB_SIZE,
+        sizeof(__nv_bfloat16) * VOCAB_SIZE, cudaMemcpyDeviceToHost));
+    for (int i = 0; i < VOCAB_SIZE; ++i) {
+      logits_f32[i] = __bfloat162float(logits_bf16[i]);
+    }
+
+    // int next_token_id = sampler.Sample(logits_f32);
+
+    int next_token_id =
         SelectMaxTokenIdx(weights, token_info, layer_context, prompt_len);
 
-    prompt.push_back(max_token_idx);
+    prompt.push_back(next_token_id);
   }
   return 0;
 }
