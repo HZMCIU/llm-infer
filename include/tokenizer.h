@@ -7,7 +7,7 @@ class Tokenizer {
 public:
   unsigned int max_token_length_;
   unsigned int bos_token_id_;
-  unsigned int eos_token_id_;
+  std::vector<unsigned int> eos_token_ids_;
 
   std::vector<std::string> vocab_;
   std::vector<float> merge_scores_;

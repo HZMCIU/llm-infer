@@ -17,7 +17,13 @@ void Tokenizer::BuildTokenizer(const std::string &dir_path) {
   this->vocab_size_ = VOCAB_SIZE;
   file.read((char *)&this->max_token_length_, sizeof(unsigned int));
   file.read((char *)&this->bos_token_id_, sizeof(unsigned int));
-  file.read((char *)&this->eos_token_id_, sizeof(unsigned int));
+
+  int eos_token_ids_len;
+  file.read((char *)&eos_token_ids_len, sizeof(int));
+  this->eos_token_ids_.resize(eos_token_ids_len);
+  for (int i = 0; i < eos_token_ids_len; ++i) {
+    file.read((char *)&this->eos_token_ids_[i], sizeof(unsigned int));
+  }
 
   this->vocab_.resize(this->vocab_size_);
   this->merge_scores_.resize(this->vocab_size_);

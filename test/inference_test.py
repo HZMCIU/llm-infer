@@ -4,25 +4,25 @@ import numpy as np
 from scipy.spatial.distance import cosine
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb, repeat_kv
 import torch.nn.functional as F
+from transformers import pipeline
 
-local_model_path = (
-    "/home/yuqyda/Data/cuda/models/LLM-Research--Llama-3.2-1B/snapshots/master"
-)
-
-tokenizer = AutoTokenizer.from_pretrained(local_model_path, local_files_only=True)
-
-model = AutoModelForCausalLM.from_pretrained(
-    local_model_path,
-    torch_dtype=torch.float16,
-    device_map="auto",
-    local_files_only=True,
-    attn_implementation="eager",
-)
-
-model.eval()
-
-prompt = "What is 2+2?<|eot_id|><|start_header_id|>assistant<|end_header_id|>"
-inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+# local_model_path = "/home/yuqyda/Data/cuda/models/qwen3-0.6b"
+local_model_path = "/home/yuqyda/Data/cuda/models/Llama-3.2-1B-Instruct"
+#
+# tokenizer = AutoTokenizer.from_pretrained(local_model_path, local_files_only=True)
+#
+# model = AutoModelForCausalLM.from_pretrained(
+#     local_model_path,
+#     torch_dtype=torch.float16,
+#     device_map="auto",
+#     local_files_only=True,
+#     attn_implementation="eager",
+# )
+#
+# model.eval()
+#
+# prompt = "The key to life is"
+# inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
 
 def compare_prefill_output():
@@ -173,8 +173,8 @@ def regressive_decode():
         # do_sample=False: 关闭随机采样，使用确定性的 argmax (Greedy Search)
         generated_sequences = model.generate(
             **inputs,
-            max_new_tokens=10,
-            min_new_tokens=10,  # 防止遇到 EOS 提前终止，强制生成满 10 个
+            max_new_tokens=100,
+            min_new_tokens=100,  # 防止遇到 EOS 提前终止，强制生成满 10 个
             do_sample=False,
             pad_token_id=tokenizer.eos_token_id
         )
@@ -182,7 +182,7 @@ def regressive_decode():
 
     new_10_token_ids = generated_sequences[0, input_len:].tolist()
 
-    print("新生成的 10 个 Token ID:", new_10_token_ids)
+    print("新生成的 100 个 Token ID:", new_10_token_ids)
     print(
         "每个 ID 对应的单词     :",
         [tokenizer.decode([tid]) for tid in new_10_token_ids],
@@ -191,4 +191,23 @@ def regressive_decode():
 
 
 if __name__ == "__main__":
-    regressive_decode()
+    # regressive_decode()
+    model_id = "LLM-Research/Llama-3.2-1B-Instruct"
+    pipe = pipeline(
+        "text-generation",
+        model=local_model_path,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a pirate chatbot who always responds in pirate speak!",
+        },
+        {"role": "user", "content": "Who are you?"},
+    ]
+    outputs = pipe(
+        messages,
+        max_new_tokens=256,
+    )
+    print(outputs[0]["generated_text"])

@@ -61,8 +61,12 @@ def build_tokenizer(model, output_dir):
 
     with open(tokenizer_path, "wb") as out_f:
         out_f.write(struct.pack("<I", max_token_length))
+
         out_f.write(struct.pack("<I", model.bos_token_id))
-        out_f.write(struct.pack("<I", model.eos_token_id))
+
+        out_f.write(struct.pack("<I", len(model.eos_token_id)))
+        for eos_token_id in model.eos_token_id:
+            out_f.write(struct.pack("<I", eos_token_id))
 
         for id, token in enumerate(all_tokens):
             token_bytes = internal_to_bytes(U2B, token)
@@ -95,9 +99,7 @@ def load_tokenizer_and_config(model_path):
 
 
 if __name__ == "__main__":
-    model_path = (
-        "/home/yuqyda/Data/cuda/models/LLM-Research--Llama-3.2-1B/snapshots/master"
-    )
+    model_path = "/home/yuqyda/Data/cuda/models/Llama-3.2-1B-Instruct"
     model_info = load_tokenizer_and_config(model_path)
 
     if model_info:

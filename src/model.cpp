@@ -19,8 +19,7 @@ int LoadWeight(Weights &weights) {
   }
 
   std::string file_path =
-      "/home/yuqyda/Data/cuda/models/LLM-Research--Llama-3.2-1B/snapshots/"
-      "master/model.safetensors";
+      "/home/yuqyda/Data/cuda/models/Llama-3.2-1B-Instruct/model.safetensors";
   std::ifstream safetensors_file(file_path, std::ios_base::binary);
 
   if (!safetensors_file.is_open()) {

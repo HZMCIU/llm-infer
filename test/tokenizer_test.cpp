@@ -1,12 +1,12 @@
 #include "tokenizer.h"
+
 #include <gtest/gtest.h>
 #include <vector>
 using namespace std;
 
 TEST(TokenizerTest, TokenizerEncode) {
   Tokenizer tokenizer;
-  string dir_path = "/home/yuqyda/Data/cuda/models/LLM-Research--Llama-3.2-1B/"
-                    "snapshots/master";
+  string dir_path = "/home/yuqyda/Data/cuda/models/Llama-3.2-1B-Instruct";
   string text =
       "What is 2+2?<|eot_id|><|start_header_id|>assistant<|end_header_id|>";
   tokenizer.BuildTokenizer(dir_path);
@@ -23,8 +23,7 @@ TEST(TokenizerTest, TokenizerEncode) {
 
 TEST(TokenizerTest, TokenizerDecode) {
   Tokenizer tokenizer;
-  string dir_path = "/home/yuqyda/Data/cuda/models/LLM-Research--Llama-3.2-1B/"
-                    "snapshots/master";
+  string dir_path = "/home/yuqyda/Data/cuda/models/Llama-3.2-1B-Instruct";
   tokenizer.BuildTokenizer(dir_path);
   printf("%s\n", tokenizer.Decode(654).c_str());
 }
