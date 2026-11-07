@@ -15,6 +15,17 @@ file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
 include(GoogleTest)
 
+option(ENABLE_SANITIZER "Enable ASan/UBSan" ON)
+
+if(ENABLE_SANITIZER)
+    set(SAN_FLAGS 
+    -fsanitize=address,undefined 
+    -fno-omit-frame-pointer 
+    -g)
+    add_compile_options(${SAN_FLAGS})
+    add_link_options(${SAN_FLAGS})
+endif()
+
 foreach(test_src ${TEST_SOURCES})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} ${test_src})
