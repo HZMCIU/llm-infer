@@ -16,4 +16,4 @@
     }                                                                          \
   } while (0);
 
-int checkGPUStatus();
+int CheckGPUStatus();

@@ -1,6 +1,6 @@
 #include "helper.h"
 
-int checkGPUStatus() {
+int CheckGPUStatus() {
   int device_count = 0;
   cudaGetDeviceCount(&device_count);
   if (device_count == 0) {

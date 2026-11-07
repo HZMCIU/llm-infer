@@ -14,7 +14,7 @@
 using json = nlohmann::json;
 
 int LoadWeight(Weights &weights) {
-  if (checkGPUStatus() != 0) {
+  if (CheckGPUStatus() != 0) {
     return 1;
   }
 

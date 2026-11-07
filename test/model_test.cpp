@@ -100,7 +100,7 @@ TEST(ModelTest, Prefill) {
   int ret = LoadWeight(weights);
 
   printf("after loads weight\n");
-  checkGPUStatus();
+  CheckGPUStatus();
   printf("\n\n");
 
   TokenInfo token_info;
@@ -181,7 +181,7 @@ TEST(ModelTest, Decode) {
   int ret = LoadWeight(weights);
 
   printf("after loads weight\n");
-  checkGPUStatus();
+  CheckGPUStatus();
   printf("\n\n");
 
   TokenInfo token_info;
