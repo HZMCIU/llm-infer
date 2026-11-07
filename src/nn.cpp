@@ -404,7 +404,7 @@ int Prefill(Weights &weights, TokenInfo &token_info,
 
 int Decode(Weights &weights, TokenInfo &token_info,
            LayerContext &layer_context) {
-  for (int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 200; ++i) {
     std::vector<int> &prompt = token_info.queue.front();
     int prompt_len = prompt.size();
     // printf("prompt_len: %d\n", prompt_len);
