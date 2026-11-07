@@ -404,10 +404,10 @@ int Prefill(Weights &weights, TokenInfo &token_info,
 
 int Decode(Weights &weights, TokenInfo &token_info,
            LayerContext &layer_context) {
-  for (int i = 0; i < 10; ++i) {
+  for (int i = 0; i < 100; ++i) {
     std::vector<int> &prompt = token_info.queue.front();
     int prompt_len = prompt.size();
-    printf("prompt_len: %d\n", prompt_len);
+    // printf("prompt_len: %d\n", prompt_len);
 
     TokenEmbedding(weights, token_info, layer_context);
     InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,

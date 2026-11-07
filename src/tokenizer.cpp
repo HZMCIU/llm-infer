@@ -122,3 +122,13 @@ void Tokenizer::Encode(std::string &text, std::vector<int> &tokens) {
     tokens.erase(tokens.begin() + best_idx + 1);
   }
 }
+
+std::string Tokenizer::RenderPrompt(std::string &text) {
+  int size =
+      std::snprintf(nullptr, 0, this->user_prompt_.c_str(), text.c_str());
+
+  std::string result(size + 1, '\0');
+  snprintf(&result[0], size + 1, this->user_prompt_.c_str(), text.c_str());
+
+  return result;
+}

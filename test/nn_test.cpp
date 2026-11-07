@@ -17,7 +17,7 @@
 
 using namespace std;
 
-TEST(ModelTest, Matmul) {
+TEST(NNTest, MatMul) {
   vector<__nv_bfloat16> weight_cpu(EMBEDDING_LENGTH * EMBEDDING_LENGTH);
   for (int i = 0; i < EMBEDDING_LENGTH * EMBEDDING_LENGTH; ++i) {
     weight_cpu[i] = (i % 32) + 1;
@@ -95,7 +95,8 @@ TEST(ModelTest, Matmul) {
   CUDA_CHECK(cudaFree(output_gpu));
 }
 
-TEST(ModelTest, Prefill) {
+TEST(NNTest, Prefill) {
+  CheckGPUStatus();
   Weights weights{};
   int ret = LoadWeight(weights);
 
@@ -176,7 +177,7 @@ TEST(ModelTest, Prefill) {
   Prefill(weights, token_info, layer_context);
 }
 
-TEST(ModelTest, Decode) {
+TEST(NNTest, Decode) {
   Weights weights{};
   int ret = LoadWeight(weights);
 
@@ -186,7 +187,11 @@ TEST(ModelTest, Decode) {
 
   TokenInfo token_info;
   token_info.queue.push(
-      {128000, 3923, 374, 220, 17, 10, 17, 30, 128009, 128006, 78191, 128007});
+      {128000, 128006, 9125,  128007, 271,    38766,  1303,   33025,  2696,
+       25,     6790,   220,   508,    1419,   271,    15724,  2696,   25,
+       220,    2589,   4723,  220,    508,    1627,   271,    2675,   527,
+       264,    11190,  18328, 13,     128009, 128006, 882,    128007, 271,
+       791,    1401,   315,   2324,   374,    128009, 128006, 78191,  128007});
   token_info.is_slot_free.resize(5, true);
   token_info.slot = 0;
   CUDA_CHECK(
@@ -240,9 +245,16 @@ TEST(ModelTest, Decode) {
 
   Prefill(weights, token_info, layer_context);
   Decode(weights, token_info, layer_context);
+
+  std::vector<int> &prompt = token_info.queue.front();
+  printf("[");
+  for (int i = 0; i < prompt.size(); ++i) {
+    printf("%d, ", prompt[i]);
+  }
+  printf("]\n");
 }
 
-TEST(ModelTest, loadWeight) {
+TEST(NNTest, LoadWeight) {
   Weights weights{};
   int ret = LoadWeight(weights);
 }
