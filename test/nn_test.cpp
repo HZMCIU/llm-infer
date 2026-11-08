@@ -175,7 +175,10 @@ TEST(NNTest, Prefill) {
   CUDA_CHECK(cudaMalloc(&layer_context.embed_proj,
                         sizeof(__nv_bfloat16) * VOCAB_SIZE * MAX_PROMPT_LEN));
 
-  Prefill(weights, token_info, layer_context);
+  Sampler sampler;
+  sampler.BuildSampler(0.8, 0.92, 30, 1234);
+
+  Prefill(weights, token_info, layer_context, sampler);
 }
 
 TEST(NNTest, Decode) {
@@ -247,7 +250,7 @@ TEST(NNTest, Decode) {
   Sampler sampler;
   sampler.BuildSampler(0.8, 0.92, 30, 1234);
 
-  Prefill(weights, token_info, layer_context);
+  Prefill(weights, token_info, layer_context, sampler);
   Decode(weights, token_info, layer_context, sampler);
 
   std::vector<int> &prompt = token_info.queue.front();

@@ -85,7 +85,7 @@ int LoadWeight(Weights &weights);
 void FreeWeight(Weights &weights);
 
 int Prefill(Weights &weights, TokenInfo &token_info,
-            LayerContext &layer_context);
+            LayerContext &layer_context, Sampler &sampler);
 
 int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
            Sampler &sampler);

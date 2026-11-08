@@ -363,31 +363,27 @@ void LayeredCompute(Weights &weights, TokenInfo &token_info,
                    CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 }
 
-int SelectMaxTokenIdx(Weights &weights, TokenInfo &token_info,
-                      LayerContext &layer_context, int prompt_len) {
-  std::vector<__nv_bfloat16> embed_proj_cpu(prompt_len * VOCAB_SIZE);
+int Sample(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
+           Sampler &sampler, int prompt_len) {
+  std::vector<__nv_bfloat16> embed_proj_bf32_cpu(VOCAB_SIZE);
+  std::vector<float> logits(VOCAB_SIZE);
 
-  cudaMemcpy(embed_proj_cpu.data(), layer_context.embed_proj,
-             sizeof(__nv_bfloat16) * prompt_len * VOCAB_SIZE,
-             cudaMemcpyDeviceToHost);
+  cudaMemcpy(embed_proj_bf32_cpu.data(),
+             layer_context.embed_proj + (prompt_len - 1) * VOCAB_SIZE,
+             sizeof(__nv_bfloat16) * VOCAB_SIZE, cudaMemcpyDeviceToHost);
 
-  int last_token_offset = (prompt_len - 1) * VOCAB_SIZE;
-  float max_token = (float)embed_proj_cpu[last_token_offset];
-  int max_token_idx = 0;
-  for (int token_idx = 0; token_idx < VOCAB_SIZE; ++token_idx) {
-    if ((float)embed_proj_cpu[token_idx + last_token_offset] > max_token) {
-      max_token = embed_proj_cpu[token_idx + last_token_offset];
-      max_token_idx = token_idx;
-    }
+  for (int i = 0; i < VOCAB_SIZE; ++i) {
+    logits[i] = float(embed_proj_bf32_cpu[i]);
   }
 
-  std::cout << "Output token: " << (float)max_token
-            << ", token index: " << std::to_string(max_token_idx) << std::endl;
+  int max_token_idx = sampler.Sample(logits);
+
+  // std::cout << "token index: " << std::to_string(max_token_idx) << std::endl;
   return max_token_idx;
 }
 
 int Prefill(Weights &weights, TokenInfo &token_info,
-            LayerContext &layer_context) {
+            LayerContext &layer_context, Sampler &sampler) {
   std::vector<int> prompt = token_info.queue.front();
   int prompt_len = prompt.size();
 
@@ -396,7 +392,7 @@ int Prefill(Weights &weights, TokenInfo &token_info,
   LayeredCompute(weights, token_info, layer_context, prompt_len);
 
   int max_token_idx =
-      SelectMaxTokenIdx(weights, token_info, layer_context, prompt_len);
+      Sample(weights, token_info, layer_context, sampler, prompt_len);
 
   prompt.push_back(max_token_idx);
   return 0;
@@ -404,8 +400,6 @@ int Prefill(Weights &weights, TokenInfo &token_info,
 
 int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
            Sampler &sampler) {
-  std::vector<__nv_bfloat16> logits_bf16(VOCAB_SIZE);
-  std::vector<float> logits_f32(VOCAB_SIZE);
 
   for (int i = 0; i < 200; ++i) {
     std::vector<int> &prompt = token_info.queue.front();
@@ -417,17 +411,8 @@ int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
                       8192);
     LayeredCompute(weights, token_info, layer_context, prompt_len);
 
-    CUDA_CHECK(cudaMemcpy(
-        logits_bf16.data(), layer_context.embed_proj + prompt_len * VOCAB_SIZE,
-        sizeof(__nv_bfloat16) * VOCAB_SIZE, cudaMemcpyDeviceToHost));
-    for (int i = 0; i < VOCAB_SIZE; ++i) {
-      logits_f32[i] = __bfloat162float(logits_bf16[i]);
-    }
-
-    // int next_token_id = sampler.Sample(logits_f32);
-
     int next_token_id =
-        SelectMaxTokenIdx(weights, token_info, layer_context, prompt_len);
+        Sample(weights, token_info, layer_context, sampler, prompt_len);
 
     prompt.push_back(next_token_id);
   }

@@ -97,9 +97,9 @@ int main(int argc, char *argv[]) {
                  sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
 
   Sampler sampler;
-  sampler.BuildSampler(0.8, 0.92, 30, 1234);
+  sampler.BuildSampler(0.4, 0.92, 30, 123456789);
 
-  Prefill(weights, token_info, layer_context);
+  Prefill(weights, token_info, layer_context, sampler);
   Decode(weights, token_info, layer_context, sampler);
 
   std::vector<int> prompt = token_info.queue.front();

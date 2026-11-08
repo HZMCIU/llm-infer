@@ -96,6 +96,7 @@ int Sampler::Sample(std::vector<float> &logits) {
   for (int i = 0; i < n_cands; ++i) {
     prob_index_[i].prob /= prob_sum;
   }
+  prob_sum = 1.0;
 
   if (this->top_p_ > 0.0f && this->top_p_ < 1.0f) {
     std::sort(this->prob_index_.begin(), this->prob_index_.begin() + n_cands,
