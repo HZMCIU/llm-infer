@@ -100,15 +100,18 @@ int main(int argc, char *argv[]) {
   sampler.BuildSampler(0.4, 0.92, 30, 123456789);
 
   Prefill(weights, token_info, layer_context, sampler);
-  Decode(weights, token_info, layer_context, sampler);
 
-  std::vector<int> prompt = token_info.queue.front();
-
-  for (int token : prompt) {
-    printf("%s", tokenizer.Decode(token).c_str());
+  for (int i = 0; i < 300; ++i) {
+    Decode(weights, token_info, layer_context, sampler);
+    std::vector<int> &prompt = token_info.queue.front();
+    int next_token = prompt.back();
+    if (tokenizer.CheckEosToken(next_token)) {
+      break;
+    }
+    printf("%s", tokenizer.Decode(next_token).c_str());
+    fflush(stdout);
   }
 
-  std::cout << "\nOk bye!" << std::endl;
   cublasDestroy(layer_context.cublas_handle);
   cudaDeviceSynchronize();
   return 0;

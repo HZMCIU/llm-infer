@@ -36,4 +36,6 @@ You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
   int StrLookup(std::string &str);
 
   std::string RenderPrompt(std::string &text);
+
+  bool CheckEosToken(unsigned int token);
 };

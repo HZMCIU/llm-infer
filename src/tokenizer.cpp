@@ -132,3 +132,12 @@ std::string Tokenizer::RenderPrompt(std::string &text) {
 
   return result;
 }
+
+bool Tokenizer::CheckEosToken(unsigned int token) {
+  for (int eos_token_id : eos_token_ids_) {
+    if (token == eos_token_id) {
+      return true;
+    }
+  }
+  return false;
+}

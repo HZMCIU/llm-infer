@@ -401,20 +401,16 @@ int Prefill(Weights &weights, TokenInfo &token_info,
 int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
            Sampler &sampler) {
 
-  for (int i = 0; i < 200; ++i) {
-    std::vector<int> &prompt = token_info.queue.front();
-    int prompt_len = prompt.size();
-    // printf("prompt_len: %d\n", prompt_len);
+  std::vector<int> &prompt = token_info.queue.front();
+  int prompt_len = prompt.size();
 
-    TokenEmbedding(weights, token_info, layer_context);
-    InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,
-                      8192);
-    LayeredCompute(weights, token_info, layer_context, prompt_len);
+  TokenEmbedding(weights, token_info, layer_context);
+  InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
+  LayeredCompute(weights, token_info, layer_context, prompt_len);
 
-    int next_token_id =
-        Sample(weights, token_info, layer_context, sampler, prompt_len);
+  int next_token_id =
+      Sample(weights, token_info, layer_context, sampler, prompt_len);
 
-    prompt.push_back(next_token_id);
-  }
+  prompt.push_back(next_token_id);
   return 0;
 }
