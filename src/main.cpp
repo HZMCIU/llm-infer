@@ -34,6 +34,10 @@ int InitializeTransformer(Weights &weights, LayerContext &layer_context) {
       cudaMalloc(&layer_context.hidden_state,
                  sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
 
+  CUDA_CHECK(cudaMalloc(&layer_context.last_generated_token, sizeof(int)));
+  CUDA_CHECK(cudaMalloc(&layer_context.last_generated_token_embedding,
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+
   CUDA_CHECK(
       cudaMalloc(&layer_context.attn_scores_v,
                  sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
@@ -71,11 +75,25 @@ int InitializeTransformer(Weights &weights, LayerContext &layer_context) {
   return 0;
 }
 
+int InitializeKVCacheContext(KVCacheContext &kv_cache_context) {
+  CUDA_CHECK(cudaMalloc(&kv_cache_context.kv_cache, KV_CACHE_SIZE_BYTES));
+  CUDA_CHECK(cudaMalloc(&kv_cache_context.block_table_gpu,
+                        N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int)));
+
+  kv_cache_context.free_blocks.resize(NUM_BLOCKS, -1);
+  std::iota(kv_cache_context.free_blocks.begin(),
+            kv_cache_context.free_blocks.end(), 0);
+  kv_cache_context.block_table.resize(N_LAYERS * MAX_BLOCKS_PER_SEQ, -1);
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
   Weights weights{};
   LayerContext layer_context;
+  KVCacheContext kv_cache_context;
 
   InitializeTransformer(weights, layer_context);
+  InitializeKVCacheContext(kv_cache_context);
 
   Tokenizer tokenizer;
   std::string dir_path = "/home/yuqyda/Data/cuda/models/Llama-3.2-1B-Instruct";
@@ -99,10 +117,10 @@ int main(int argc, char *argv[]) {
   Sampler sampler;
   sampler.BuildSampler(0.4, 0.92, 30, 123456789);
 
-  Prefill(weights, token_info, layer_context, sampler);
+  Prefill(weights, token_info, layer_context, kv_cache_context, sampler);
 
   for (int i = 0; i < 300; ++i) {
-    Decode(weights, token_info, layer_context, sampler);
+    Decode(weights, token_info, layer_context, kv_cache_context, sampler);
     std::vector<int> &prompt = token_info.queue.front();
     int next_token = prompt.back();
     if (tokenizer.CheckEosToken(next_token)) {

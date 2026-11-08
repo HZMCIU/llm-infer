@@ -133,9 +133,9 @@ void FreeWeight(Weights &weights) {
   }
 }
 
-void TokenEmbedding(Weights &weights, TokenInfo &token_info,
-                    LayerContext &layer_context) {
-  std::vector<int> prompt = token_info.queue.front();
+void TokenEmbeddingPrefill(Weights &weights, TokenInfo &token_info,
+                           LayerContext &layer_context) {
+  std::vector<int> &prompt = token_info.queue.front();
   int prompt_len = prompt.size();
 
   CUDA_CHECK(cudaMemcpy(token_info.input_token_gpu, prompt.data(),
@@ -145,6 +145,18 @@ void TokenEmbedding(Weights &weights, TokenInfo &token_info,
   CUDA_CHECK(cudaMemcpy(layer_context.hidden_state, layer_context.input,
                         sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * prompt_len,
                         cudaMemcpyDeviceToDevice));
+}
+
+void TokenEmbeddingDecode(Weights &weights, TokenInfo &token_info,
+                          LayerContext &layer_context) {
+  std::vector<int> &prompt = token_info.queue.front();
+  int last_generated_token = prompt.back();
+
+  CUDA_CHECK(cudaMemcpy(layer_context.last_generated_token,
+                        &last_generated_token, sizeof(int),
+                        cudaMemcpyHostToDevice));
+  EmbeddingGather(layer_context.last_generated_token, weights.embed_tokens,
+                  layer_context.last_generated_token_embedding, 1);
 }
 
 // 1. 输出为人类可读的 .txt 文件 (如果指针在 GPU 上，自动拷回 CPU 并转 float)
@@ -177,8 +189,10 @@ void DumpBf16ToTxt(const std::string &filename, const __nv_bfloat16 *d_ptr,
   out.close();
 }
 
-void LayeredCompute(Weights &weights, TokenInfo &token_info,
-                    LayerContext &layer_context, int prompt_len) {
+void TransformerLayersPrefillCompute(Weights &weights, TokenInfo &token_info,
+                                     LayerContext &layer_context,
+                                     KVCacheContext &kv_cache_context,
+                                     int prompt_len) {
   for (int layer = 0; layer < N_LAYERS; ++layer) {
     RmsNorm(layer_context.hidden_state, layer_context.input,
             weights.input_layernorm[layer], prompt_len);
@@ -228,6 +242,40 @@ void LayeredCompute(Weights &weights, TokenInfo &token_info,
 
     Rope(layer_context.q_proj, prompt_len, EMBEDDING_LENGTH);
     Rope(layer_context.k_proj, prompt_len, KV_DIM);
+
+    for (int token_idx = 0; token_idx < prompt_len; token_idx += BLOCK_SIZE) {
+      int num_tokens_to_copy = prompt_len - token_idx;
+      if (num_tokens_to_copy > BLOCK_SIZE) {
+        num_tokens_to_copy = BLOCK_SIZE;
+      }
+
+      int block_idx = token_idx / BLOCK_SIZE;
+      int block =
+          kv_cache_context.block_table[layer * MAX_BLOCKS_PER_SEQ + block_idx];
+      if (block == -1) {
+        int physical_block_idx = kv_cache_context.free_blocks.back();
+        kv_cache_context.free_blocks.pop_back();
+        block = physical_block_idx;
+        kv_cache_context.block_table[layer * MAX_BLOCKS_PER_SEQ + block_idx] =
+            block;
+      }
+
+      __nv_bfloat16 *k_cache_ptr =
+          (__nv_bfloat16 *)((char *)kv_cache_context.kv_cache +
+                            block * BLOCK_BYTES);
+      __nv_bfloat16 *k_proj_ptr = layer_context.k_proj + token_idx * KV_DIM;
+      CUDA_CHECK(cudaMemcpy(k_cache_ptr, k_proj_ptr,
+                            sizeof(__nv_bfloat16) * KV_DIM * num_tokens_to_copy,
+                            cudaMemcpyDeviceToDevice));
+
+      __nv_bfloat16 *v_cache_ptr =
+          (__nv_bfloat16 *)((char *)kv_cache_context.kv_cache +
+                            BLOCK_SIZE * block + V_OFFSET);
+      __nv_bfloat16 *v_proj_ptr = layer_context.v_proj + token_idx * KV_DIM;
+      CUDA_CHECK(cudaMemcpy(v_cache_ptr, v_proj_ptr,
+                            num_tokens_to_copy * KV_DIM * sizeof(__nv_bfloat16),
+                            cudaMemcpyDeviceToDevice));
+    }
 
     for (int i = 0; i < NUM_Q_HEADS; ++i) {
       int k_head_idx = i / GQA_Q_TO_K_RATIO;
@@ -363,6 +411,190 @@ void LayeredCompute(Weights &weights, TokenInfo &token_info,
                    CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 }
 
+void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
+                                    LayerContext &layer_context,
+                                    KVCacheContext &kv_cache_context,
+                                    int prompt_len) {
+  for (int layer = 0; layer < N_LAYERS; ++layer) {
+    RmsNorm(layer_context.hidden_state,
+            layer_context.last_generated_token_embedding,
+            weights.input_layernorm[layer], 1);
+
+    cublasStatus_t q_proj_staus =
+        cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
+
+                     EMBEDDING_LENGTH, 1, EMBEDDING_LENGTH,
+
+                     &layer_context.q_proj_alpha, weights.w_q[layer],
+                     CUDA_R_16BF, EMBEDDING_LENGTH,
+
+                     layer_context.last_generated_token_embedding, CUDA_R_16BF,
+                     EMBEDDING_LENGTH,
+
+                     &layer_context.q_proj_beta, layer_context.q_proj,
+                     CUDA_R_16BF, EMBEDDING_LENGTH,
+
+                     CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+
+    cublasStatus_t k_proj_status = cublasGemmEx(
+        layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
+
+        KV_DIM, 1, EMBEDDING_LENGTH,
+
+        &layer_context.k_proj_alpha, weights.w_k[layer], CUDA_R_16BF,
+        EMBEDDING_LENGTH,
+
+        layer_context.last_generated_token_embedding, CUDA_R_16BF,
+        EMBEDDING_LENGTH,
+
+        &layer_context.k_proj_beta, layer_context.k_proj, CUDA_R_16BF, KV_DIM,
+
+        CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+
+    cublasStatus_t v_proj_status = cublasGemmEx(
+        layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
+
+        KV_DIM, 1, EMBEDDING_LENGTH,
+
+        &layer_context.v_proj_alpha, weights.w_v[layer], CUDA_R_16BF,
+        EMBEDDING_LENGTH,
+
+        layer_context.last_generated_token_embedding, CUDA_R_16BF,
+        EMBEDDING_LENGTH,
+
+        &layer_context.v_proj_beta, layer_context.v_proj, CUDA_R_16BF, KV_DIM,
+
+        CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+
+    Rope(layer_context.q_proj, 1, EMBEDDING_LENGTH);
+    Rope(layer_context.k_proj, 1, KV_DIM);
+
+    int logical_block_idx = prompt_len / BLOCK_SIZE;
+    int token_in_block_idx = prompt_len % BLOCK_SIZE;
+
+    int block =
+        kv_cache_context
+            .block_table[layer * MAX_BLOCKS_PER_SEQ + logical_block_idx];
+    if (token_in_block_idx == 0) {
+      int physical_block_idx = kv_cache_context.free_blocks.back();
+      kv_cache_context.free_blocks.pop_back();
+      block = physical_block_idx;
+      kv_cache_context
+          .block_table[layer * MAX_BLOCKS_PER_SEQ + logical_block_idx] = block;
+    }
+
+    __nv_bfloat16 *k_cache_ptr =
+        (__nv_bfloat16 *)((char *)kv_cache_context.kv_cache +
+                          block * BLOCK_BYTES +
+                          token_in_block_idx * KV_DIM * sizeof(__nv_bfloat16));
+    CUDA_CHECK(cudaMemcpy(layer_context.k_proj, k_cache_ptr,
+                          KV_DIM * sizeof(__nv_bfloat16),
+                          cudaMemcpyDeviceToDevice));
+
+    __nv_bfloat16 *v_cache_ptr =
+        (__nv_bfloat16 *)((char *)kv_cache_context.kv_cache +
+                          block * BLOCK_BYTES + V_OFFSET +
+                          token_in_block_idx * KV_DIM * sizeof(__nv_bfloat16));
+    CUDA_CHECK(cudaMemcpy(layer_context.v_proj, v_cache_ptr,
+                          KV_DIM * sizeof(__nv_bfloat16),
+                          cudaMemcpyDeviceToDevice));
+
+    CUDA_CHECK(cudaMemcpy(
+        kv_cache_context.block_table_gpu, kv_cache_context.block_table.data(),
+        N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int), cudaMemcpyHostToDevice));
+
+    PagedAttention(layer, layer_context.q_proj, kv_cache_context.kv_cache,
+                   kv_cache_context.block_table_gpu, prompt_len,
+                   layer_context.attn_scores_v);
+
+    cublasStatus_t o_proj_staus =
+        cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
+
+                     EMBEDDING_LENGTH, 1, EMBEDDING_LENGTH,
+
+                     &layer_context.o_proj_alpha, weights.w_o[layer],
+                     CUDA_R_16BF, EMBEDDING_LENGTH,
+
+                     layer_context.attn_scores_v, CUDA_R_16BF, EMBEDDING_LENGTH,
+
+                     &layer_context.o_proj_beta, layer_context.o_proj,
+                     CUDA_R_16BF, EMBEDDING_LENGTH,
+
+                     CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+
+    ResidualAdd(layer_context.hidden_state, layer_context.o_proj, 1);
+    RmsNorm(layer_context.hidden_state,
+            layer_context.last_generated_token_embedding,
+            weights.post_attn_layernorms[layer], 1);
+
+    cublasStatus_t gate_status = cublasGemmEx(
+        layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
+
+        HIDDEN_DIM, 1, EMBEDDING_LENGTH,
+
+        &layer_context.gate_alpha, weights.mlp_gate_proj[layer], CUDA_R_16BF,
+        EMBEDDING_LENGTH,
+
+        layer_context.last_generated_token_embedding, CUDA_R_16BF,
+        EMBEDDING_LENGTH,
+
+        &layer_context.gate_beta, layer_context.gate, CUDA_R_16BF, HIDDEN_DIM,
+
+        CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+
+    cublasStatus_t up_status = cublasGemmEx(
+        layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
+
+        HIDDEN_DIM, 1, EMBEDDING_LENGTH,
+
+        &layer_context.up_alpha, weights.mlp_up_proj[layer], CUDA_R_16BF,
+        EMBEDDING_LENGTH,
+
+        layer_context.last_generated_token_embedding, CUDA_R_16BF,
+        EMBEDDING_LENGTH,
+
+        &layer_context.up_beta, layer_context.up, CUDA_R_16BF, HIDDEN_DIM,
+
+        CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+
+    Silu(layer_context.gate, layer_context.up, 1);
+
+    cublasStatus_t down_status =
+        cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
+                     EMBEDDING_LENGTH, 1, HIDDEN_DIM,
+
+                     &layer_context.down_alpha, weights.mlp_down_proj[layer],
+                     CUDA_R_16BF, HIDDEN_DIM,
+
+                     layer_context.gate, CUDA_R_16BF, HIDDEN_DIM,
+
+                     &layer_context.down_beta, layer_context.down, CUDA_R_16BF,
+                     EMBEDDING_LENGTH,
+
+                     CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+
+    ResidualAdd(layer_context.hidden_state, layer_context.down, 1);
+  }
+
+  RmsNorm(layer_context.hidden_state,
+          layer_context.last_generated_token_embedding, weights.norm, 1);
+
+  cublasStatus_t embed_status =
+      cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
+
+                   VOCAB_SIZE, prompt_len, EMBEDDING_LENGTH,
+
+                   &layer_context.embed_alpha, weights.embed_tokens,
+                   CUDA_R_16BF, EMBEDDING_LENGTH,
+
+                   layer_context.input, CUDA_R_16BF, EMBEDDING_LENGTH,
+
+                   &layer_context.embed_beta, layer_context.embed_proj,
+                   CUDA_R_16BF, VOCAB_SIZE,
+
+                   CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+}
+
 int Sample(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
            Sampler &sampler, int prompt_len) {
   std::vector<__nv_bfloat16> embed_proj_bf32_cpu(VOCAB_SIZE);
@@ -383,13 +615,15 @@ int Sample(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
 }
 
 int Prefill(Weights &weights, TokenInfo &token_info,
-            LayerContext &layer_context, Sampler &sampler) {
+            LayerContext &layer_context, KVCacheContext &kv_cache_context,
+            Sampler &sampler) {
   std::vector<int> prompt = token_info.queue.front();
   int prompt_len = prompt.size();
 
-  TokenEmbedding(weights, token_info, layer_context);
+  TokenEmbeddingPrefill(weights, token_info, layer_context);
   InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
-  LayeredCompute(weights, token_info, layer_context, prompt_len);
+  TransformerLayersPrefillCompute(weights, token_info, layer_context,
+                                  kv_cache_context, prompt_len);
 
   int max_token_idx =
       Sample(weights, token_info, layer_context, sampler, prompt_len);
@@ -399,18 +633,31 @@ int Prefill(Weights &weights, TokenInfo &token_info,
 }
 
 int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
-           Sampler &sampler) {
-
-  std::vector<int> &prompt = token_info.queue.front();
+           KVCacheContext &kv_cache_context, Sampler &sampler) {
+  std::vector<int> prompt = token_info.queue.front();
   int prompt_len = prompt.size();
 
-  TokenEmbedding(weights, token_info, layer_context);
+  TokenEmbeddingDecode(weights, token_info, layer_context);
   InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f, 8192);
-  LayeredCompute(weights, token_info, layer_context, prompt_len);
 
-  int next_token_id =
+  TransformerLayersDecodeCompute(weights, token_info, layer_context,
+                                 kv_cache_context, prompt_len);
+
+  int max_token_idx =
       Sample(weights, token_info, layer_context, sampler, prompt_len);
 
-  prompt.push_back(next_token_id);
+  prompt.push_back(max_token_idx);
+  // std::vector<int> &prompt = token_info.queue.front();
+  // int prompt_len = prompt.size();
+  //
+  // TokenEmbedding(weights, token_info, layer_context);
+  // InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,
+  // 8192); LayeredCompute(weights, token_info, layer_context, prompt_len);
+  //
+  // int next_token_id =
+  //     Sample(weights, token_info, layer_context, sampler, prompt_len);
+  //
+  // prompt.push_back(next_token_id);
+
   return 0;
 }

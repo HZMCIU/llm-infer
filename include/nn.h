@@ -29,6 +29,9 @@ struct LayerContext {
   __nv_bfloat16 *input;
   __nv_bfloat16 *hidden_state;
 
+  int *last_generated_token;
+  __nv_bfloat16 *last_generated_token_embedding;
+
   __nv_bfloat16 *q_proj;
   __nv_bfloat16 *k_proj;
   __nv_bfloat16 *v_proj;
@@ -70,6 +73,13 @@ struct LayerContext {
   float embed_beta = 0.0f;
 };
 
+struct KVCacheContext {
+  __nv_bfloat16 *kv_cache;
+  int *block_table_gpu;
+  std::vector<int> block_table;
+  std::vector<int> free_blocks;
+};
+
 struct TokenInfo {
   std::queue<std::vector<int>> queue;
   int *input_token_gpu;
@@ -85,7 +95,8 @@ int LoadWeight(Weights &weights);
 void FreeWeight(Weights &weights);
 
 int Prefill(Weights &weights, TokenInfo &token_info,
-            LayerContext &layer_context, Sampler &sampler);
+            LayerContext &layer_context, KVCacheContext &kv_cache_context,
+            Sampler &sampler);
 
 int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
-           Sampler &sampler);
+           KVCacheContext &kv_cache_context, Sampler &sampler);

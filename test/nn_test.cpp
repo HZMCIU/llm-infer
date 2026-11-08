@@ -105,6 +105,16 @@ TEST(NNTest, Prefill) {
   CheckGPUStatus();
   printf("\n\n");
 
+  KVCacheContext kv_cache_context;
+  CUDA_CHECK(cudaMalloc(&kv_cache_context.kv_cache, KV_CACHE_SIZE_BYTES));
+  CUDA_CHECK(cudaMalloc(&kv_cache_context.block_table_gpu,
+                        N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int)));
+
+  kv_cache_context.free_blocks.resize(NUM_BLOCKS, -1);
+  std::iota(kv_cache_context.free_blocks.begin(),
+            kv_cache_context.free_blocks.end(), 0);
+  kv_cache_context.block_table.resize(N_LAYERS * MAX_BLOCKS_PER_SEQ, -1);
+
   TokenInfo token_info;
   token_info.queue.push(
       {128000, 3923, 374, 220, 17, 10, 17, 30, 128009, 128006, 78191, 128007});
@@ -178,7 +188,7 @@ TEST(NNTest, Prefill) {
   Sampler sampler;
   sampler.BuildSampler(0.8, 0.92, 30, 1234);
 
-  Prefill(weights, token_info, layer_context, sampler);
+  Prefill(weights, token_info, layer_context, kv_cache_context, sampler);
 }
 
 TEST(NNTest, Decode) {
@@ -201,6 +211,16 @@ TEST(NNTest, Decode) {
   CUDA_CHECK(
       cudaMalloc(&token_info.input_token_gpu,
                  sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * MAX_PROMPT_LEN));
+
+  KVCacheContext kv_cache_context;
+  CUDA_CHECK(cudaMalloc(&kv_cache_context.kv_cache, KV_CACHE_SIZE_BYTES));
+  CUDA_CHECK(cudaMalloc(&kv_cache_context.block_table_gpu,
+                        N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int)));
+
+  kv_cache_context.free_blocks.resize(NUM_BLOCKS, -1);
+  std::iota(kv_cache_context.free_blocks.begin(),
+            kv_cache_context.free_blocks.end(), 0);
+  kv_cache_context.block_table.resize(N_LAYERS * MAX_BLOCKS_PER_SEQ, -1);
 
   LayerContext layer_context;
   cublasStatus_t status = cublasCreate(&layer_context.cublas_handle);
@@ -250,8 +270,8 @@ TEST(NNTest, Decode) {
   Sampler sampler;
   sampler.BuildSampler(0.8, 0.92, 30, 1234);
 
-  Prefill(weights, token_info, layer_context, sampler);
-  Decode(weights, token_info, layer_context, sampler);
+  Prefill(weights, token_info, layer_context, kv_cache_context, sampler);
+  Decode(weights, token_info, layer_context, kv_cache_context, sampler);
 
   std::vector<int> &prompt = token_info.queue.front();
   printf("[");

@@ -406,21 +406,16 @@ void SoftmaxDecode(__nv_bfloat16 *input, int seq_len) {
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void PagedAttentionKernel(int layer, int active_slot_num,
-                                     __nv_bfloat16 *q_proj,
+__global__ void PagedAttentionKernel(int layer, __nv_bfloat16 *q_proj,
                                      __nv_bfloat16 *kv_cache,
-                                     int *block_table_gpu, int *seq_lens_gpu,
-                                     int *active_slots_gpu,
+                                     int *block_table_gpu, int seq_len_gpu,
                                      __nv_bfloat16 *output) {
   __shared__ float dot_products[2];
-  int active_slot = blockIdx.x;
-  int slot = active_slots_gpu[active_slot];
-  int q_head_id = blockIdx.y;
+  int q_head_id = blockIdx.x;
   int thread_id = threadIdx.x;
   int kv_head_idx = q_head_id / GQA_Q_TO_K_RATIO;
-  __nv_bfloat16 q =
-      q_proj[active_slot * EMBEDDING_LENGTH + q_head_id * HEAD_DIM + thread_id];
-  int seq_len = seq_lens_gpu[active_slot];
+  __nv_bfloat16 q = q_proj[q_head_id * HEAD_DIM + thread_id];
+  int seq_len = seq_len_gpu;
   int blocks_num = (seq_len + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
   float current_max = -INFINITY;
@@ -430,8 +425,7 @@ __global__ void PagedAttentionKernel(int layer, int active_slot_num,
   for (int logical_block_idx = 0; logical_block_idx < blocks_num;
        ++logical_block_idx) {
     int physical_block =
-        block_table_gpu[slot * N_LAYERS * MAX_BLOCKS_PER_SEQ +
-                        layer * MAX_BLOCKS_PER_SEQ + logical_block_idx];
+        block_table_gpu[layer * MAX_BLOCKS_PER_SEQ + logical_block_idx];
     int tokens_in_block =
         min(seq_len - logical_block_idx * BLOCK_SIZE, BLOCK_SIZE);
 
@@ -477,17 +471,14 @@ __global__ void PagedAttentionKernel(int layer, int active_slot_num,
       acc = acc * correction_factor + exp_score * (float)*v;
     }
   }
-  output[active_slot * EMBEDDING_LENGTH + q_head_id * HEAD_DIM + thread_id] =
-      acc / d;
+  output[q_head_id * HEAD_DIM + thread_id] = acc / d;
 }
 
-void PagedAttention(int layer, int active_slot_num, __nv_bfloat16 *q_proj,
-                    __nv_bfloat16 *kv_cache, int *block_table_gpu,
-                    int *seq_lens_gpu, int *active_slots_gpu,
+void PagedAttention(int layer, __nv_bfloat16 *q_proj, __nv_bfloat16 *kv_cache,
+                    int *block_table_gpu, int seq_len_gpu,
                     __nv_bfloat16 *output) {
-  PagedAttentionKernel<<<dim3(active_slot_num, NUM_Q_HEADS), HEAD_DIM>>>(
-      layer, active_slot_num, q_proj, kv_cache, block_table_gpu, seq_lens_gpu,
-      active_slots_gpu, output);
+  PagedAttentionKernel<<<NUM_Q_HEADS, HEAD_DIM>>>(
+      layer, q_proj, kv_cache, block_table_gpu, seq_len_gpu, output);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
