@@ -133,32 +133,6 @@ void FreeWeight(Weights &weights) {
   }
 }
 
-void TokenEmbeddingPrefill(Weights &weights, TokenInfo &token_info,
-                           LayerContext &layer_context) {
-  std::vector<int> &prompt = token_info.queue.front();
-  int prompt_len = prompt.size();
-
-  CUDA_CHECK(cudaMemcpy(token_info.input_token_gpu, prompt.data(),
-                        prompt_len * sizeof(int), cudaMemcpyHostToDevice));
-  EmbeddingGather(token_info.input_token_gpu, weights.embed_tokens,
-                  layer_context.input, prompt_len);
-  CUDA_CHECK(cudaMemcpy(layer_context.hidden_state, layer_context.input,
-                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * prompt_len,
-                        cudaMemcpyDeviceToDevice));
-}
-
-void TokenEmbeddingDecode(Weights &weights, TokenInfo &token_info,
-                          LayerContext &layer_context) {
-  std::vector<int> &prompt = token_info.queue.front();
-  int last_generated_token = prompt.back();
-
-  CUDA_CHECK(cudaMemcpy(layer_context.last_generated_token,
-                        &last_generated_token, sizeof(int),
-                        cudaMemcpyHostToDevice));
-  EmbeddingGather(layer_context.last_generated_token, weights.embed_tokens,
-                  layer_context.last_generated_token_embedding, 1);
-}
-
 // 1. 输出为人类可读的 .txt 文件 (如果指针在 GPU 上，自动拷回 CPU 并转 float)
 void DumpBf16ToTxt(const std::string &filename, const __nv_bfloat16 *d_ptr,
                    size_t size, size_t cols = 4096, bool is_device_ptr = true) {
@@ -187,6 +161,36 @@ void DumpBf16ToTxt(const std::string &filename, const __nv_bfloat16 *d_ptr,
     }
   }
   out.close();
+}
+
+void TokenEmbeddingPrefill(Weights &weights, TokenInfo &token_info,
+                           LayerContext &layer_context) {
+  std::vector<int> &prompt = token_info.queue.front();
+  int prompt_len = prompt.size();
+
+  CUDA_CHECK(cudaMemcpy(token_info.input_token_gpu, prompt.data(),
+                        prompt_len * sizeof(int), cudaMemcpyHostToDevice));
+  EmbeddingGather(token_info.input_token_gpu, weights.embed_tokens,
+                  layer_context.input, prompt_len);
+  CUDA_CHECK(cudaMemcpy(layer_context.hidden_state, layer_context.input,
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH * prompt_len,
+                        cudaMemcpyDeviceToDevice));
+}
+
+void TokenEmbeddingDecode(Weights &weights, TokenInfo &token_info,
+                          LayerContext &layer_context) {
+  std::vector<int> &prompt = token_info.queue.front();
+  // int last_generated_token = prompt.back();
+  int last_generated_token = 128007;
+
+  CUDA_CHECK(cudaMemcpy(layer_context.last_generated_token,
+                        &last_generated_token, sizeof(int),
+                        cudaMemcpyHostToDevice));
+  EmbeddingGather(layer_context.last_generated_token, weights.embed_tokens,
+                  layer_context.last_generated_token_embedding, 1);
+  CUDA_CHECK(cudaMemcpy(
+      layer_context.hidden_state, layer_context.last_generated_token_embedding,
+      sizeof(__nv_bfloat16) * EMBEDDING_LENGTH, cudaMemcpyDeviceToDevice));
 }
 
 void TransformerLayersPrefillCompute(Weights &weights, TokenInfo &token_info,
@@ -270,7 +274,7 @@ void TransformerLayersPrefillCompute(Weights &weights, TokenInfo &token_info,
 
       __nv_bfloat16 *v_cache_ptr =
           (__nv_bfloat16 *)((char *)kv_cache_context.kv_cache +
-                            BLOCK_SIZE * block + V_OFFSET);
+                            BLOCK_BYTES * block + V_OFFSET);
       __nv_bfloat16 *v_proj_ptr = layer_context.v_proj + token_idx * KV_DIM;
       CUDA_CHECK(cudaMemcpy(v_cache_ptr, v_proj_ptr,
                             num_tokens_to_copy * KV_DIM * sizeof(__nv_bfloat16),
@@ -324,6 +328,11 @@ void TransformerLayersPrefillCompute(Weights &weights, TokenInfo &token_info,
 
           CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
     }
+
+    // if (layer == 0) {
+    //   DumpBf16ToTxt("a.txt", layer_context.attn_scores_v,
+    //                 prompt_len * prompt_len, prompt_len);
+    // }
 
     cublasStatus_t o_proj_staus =
         cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
@@ -466,8 +475,8 @@ void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
 
         CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
-    Rope(layer_context.q_proj, 1, EMBEDDING_LENGTH);
-    Rope(layer_context.k_proj, 1, KV_DIM);
+    RopeDecode(layer_context.q_proj, prompt_len, EMBEDDING_LENGTH);
+    RopeDecode(layer_context.k_proj, prompt_len, KV_DIM);
 
     int logical_block_idx = prompt_len / BLOCK_SIZE;
     int token_in_block_idx = prompt_len % BLOCK_SIZE;
@@ -487,7 +496,7 @@ void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
         (__nv_bfloat16 *)((char *)kv_cache_context.kv_cache +
                           block * BLOCK_BYTES +
                           token_in_block_idx * KV_DIM * sizeof(__nv_bfloat16));
-    CUDA_CHECK(cudaMemcpy(layer_context.k_proj, k_cache_ptr,
+    CUDA_CHECK(cudaMemcpy(k_cache_ptr, layer_context.k_proj,
                           KV_DIM * sizeof(__nv_bfloat16),
                           cudaMemcpyDeviceToDevice));
 
@@ -495,7 +504,7 @@ void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
         (__nv_bfloat16 *)((char *)kv_cache_context.kv_cache +
                           block * BLOCK_BYTES + V_OFFSET +
                           token_in_block_idx * KV_DIM * sizeof(__nv_bfloat16));
-    CUDA_CHECK(cudaMemcpy(layer_context.v_proj, v_cache_ptr,
+    CUDA_CHECK(cudaMemcpy(v_cache_ptr, layer_context.v_proj,
                           KV_DIM * sizeof(__nv_bfloat16),
                           cudaMemcpyDeviceToDevice));
 
@@ -504,9 +513,13 @@ void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
         N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int), cudaMemcpyHostToDevice));
 
     PagedAttention(layer, layer_context.q_proj, kv_cache_context.kv_cache,
-                   kv_cache_context.block_table_gpu, prompt_len,
+                   kv_cache_context.block_table_gpu, prompt_len + 1,
                    layer_context.attn_scores_v);
 
+    if (layer == 0) {
+      DumpBf16ToTxt("b.txt", layer_context.attn_scores_v, prompt_len + 1,
+                    prompt_len + 1);
+    }
     cublasStatus_t o_proj_staus =
         cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
 
@@ -582,7 +595,7 @@ void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
   cublasStatus_t embed_status =
       cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
 
-                   VOCAB_SIZE, prompt_len, EMBEDDING_LENGTH,
+                   VOCAB_SIZE, 1, EMBEDDING_LENGTH,
 
                    &layer_context.embed_alpha, weights.embed_tokens,
                    CUDA_R_16BF, EMBEDDING_LENGTH,
@@ -634,7 +647,7 @@ int Prefill(Weights &weights, TokenInfo &token_info,
 
 int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
            KVCacheContext &kv_cache_context, Sampler &sampler) {
-  std::vector<int> prompt = token_info.queue.front();
+  std::vector<int> &prompt = token_info.queue.front();
   int prompt_len = prompt.size();
 
   TokenEmbeddingDecode(weights, token_info, layer_context);
@@ -650,14 +663,15 @@ int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
   // std::vector<int> &prompt = token_info.queue.front();
   // int prompt_len = prompt.size();
   //
-  // TokenEmbedding(weights, token_info, layer_context);
+  // TokenEmbeddingPrefill(weights, token_info, layer_context);
   // InitRopeFrequency(HEAD_DIM, MAX_SEQ_LEN, 500000.0f, 32.0f, 1.0f, 4.0f,
-  // 8192); LayeredCompute(weights, token_info, layer_context, prompt_len);
+  // 8192); TransformerLayersPrefillCompute(weights, token_info, layer_context,
+  //                                 kv_cache_context, prompt_len);
   //
   // int next_token_id =
   //     Sample(weights, token_info, layer_context, sampler, prompt_len);
   //
   // prompt.push_back(next_token_id);
 
-  return 0;
+  return max_token_idx;
 }

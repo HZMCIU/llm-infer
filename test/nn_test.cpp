@@ -15,6 +15,7 @@
 #include "kernel.cuh"
 #include "nn.h"
 #include "sampler.h"
+#include "tokenizer.h"
 
 using namespace std;
 
@@ -186,7 +187,7 @@ TEST(NNTest, Prefill) {
                         sizeof(__nv_bfloat16) * VOCAB_SIZE * MAX_PROMPT_LEN));
 
   Sampler sampler;
-  sampler.BuildSampler(0.8, 0.92, 30, 1234);
+  sampler.BuildSampler(1.0, 0.92, 30, 1234);
 
   Prefill(weights, token_info, layer_context, kv_cache_context, sampler);
 }
@@ -201,11 +202,7 @@ TEST(NNTest, Decode) {
 
   TokenInfo token_info;
   token_info.queue.push(
-      {128000, 128006, 9125,  128007, 271,    38766,  1303,   33025,  2696,
-       25,     6790,   220,   508,    1419,   271,    15724,  2696,   25,
-       220,    2589,   4723,  220,    508,    1627,   271,    2675,   527,
-       264,    11190,  18328, 13,     128009, 128006, 882,    128007, 271,
-       791,    1401,   315,   2324,   374,    128009, 128006, 78191,  128007});
+      {128000, 3923, 374, 220, 17, 10, 17, 30, 128009, 128006, 78191});
   token_info.is_slot_free.resize(5, true);
   token_info.slot = 0;
   CUDA_CHECK(
@@ -267,18 +264,39 @@ TEST(NNTest, Decode) {
   CUDA_CHECK(cudaMalloc(&layer_context.embed_proj,
                         sizeof(__nv_bfloat16) * VOCAB_SIZE * MAX_PROMPT_LEN));
 
+  CUDA_CHECK(cudaMalloc(&layer_context.last_generated_token, sizeof(int)));
+  CUDA_CHECK(cudaMalloc(&layer_context.last_generated_token_embedding,
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+
   Sampler sampler;
-  sampler.BuildSampler(0.8, 0.92, 30, 1234);
+  sampler.BuildSampler(1, 0.92, 30, 1234);
+
+  Tokenizer tokenizer;
+  std::string dir_path = "/home/yuqyda/Data/cuda/models/Llama-3.2-1B-Instruct";
+  tokenizer.BuildTokenizer(dir_path);
 
   Prefill(weights, token_info, layer_context, kv_cache_context, sampler);
-  Decode(weights, token_info, layer_context, kv_cache_context, sampler);
 
-  std::vector<int> &prompt = token_info.queue.front();
-  printf("[");
-  for (int i = 0; i < prompt.size(); ++i) {
-    printf("%d, ", prompt[i]);
-  }
-  printf("]\n");
+  // for (int i = 0; i < 300; ++i) {
+  //   int next_token =
+  //       Decode(weights, token_info, layer_context, kv_cache_context,
+  //       sampler);
+  //   // std::vector<int> &prompt = token_info.queue.front();
+  //   // int next_token = prompt.back();
+  //   if (tokenizer.CheckEosToken(next_token)) {
+  //     break;
+  //   }
+  //   printf("%s", tokenizer.Decode(next_token).c_str());
+  //   fflush(stdout);
+  // }
+
+  int next_token =
+      Decode(weights, token_info, layer_context, kv_cache_context, sampler);
+  printf("output token %d\n", next_token);
+  // for (int i = 0; i < 100; ++i) {
+  //   printf("output token:%d\n", Decode(weights, token_info, layer_context,
+  //   kv_cache_context, sampler));
+  // }
 }
 
 TEST(NNTest, LoadWeight) {

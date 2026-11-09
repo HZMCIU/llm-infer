@@ -203,3 +203,67 @@ TEST(KernelTest, Rope) {
   }
   CUDA_CHECK(cudaFree(input_gpu));
 }
+
+TEST(KernelTest, PagedAttention) {
+  int layer = 0;
+  __nv_bfloat16 *q_proj_gpu = nullptr;
+  __nv_bfloat16 *kv_cache_gpu = nullptr;
+  int *block_table_gpu = nullptr;
+  __nv_bfloat16 *output_gpu = nullptr;
+
+  // 1. init q_proj
+  CUDA_CHECK(cudaMalloc(&q_proj_gpu, sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+  vector<__nv_bfloat16> q_proj_cpu(EMBEDDING_LENGTH);
+  for (int i = 0; i < EMBEDDING_LENGTH; ++i) {
+    q_proj_cpu[i] = (((i + 1) % 17) - 8) * 0.125f;
+  }
+  CUDA_CHECK(cudaMemcpy(q_proj_gpu, q_proj_cpu.data(),
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
+                        cudaMemcpyHostToDevice));
+
+  // 2. init block table / kv cache
+  vector<int> block_table_cpu(MAX_BLOCKS_PER_SEQ * N_LAYERS, -1);
+  CUDA_CHECK(cudaMalloc(&block_table_gpu,
+                        sizeof(int) * MAX_BLOCKS_PER_SEQ * N_LAYERS));
+
+  vector<__nv_bfloat16> kv_cache_cpu(N_LAYERS * MAX_PROMPT_LEN * KV_DIM * 2);
+  CUDA_CHECK(cudaMalloc(&kv_cache_gpu, KV_CACHE_SIZE_BYTES));
+  int block = 0;
+
+  int cnt1 = 1, cnt2 = 1;
+  for (int i = 0; i < 32; i += BLOCK_SIZE) {
+    block_table_cpu[0 * MAX_BLOCKS_PER_SEQ + i / BLOCK_SIZE] = block;
+    for (int j = 0; j < BLOCK_SIZE; ++j) {
+      for (int k = 0; k < KV_DIM; ++k) {
+
+        kv_cache_cpu[block * BLOCK_BYTES / 2 + j * KV_DIM + k] =
+            ((cnt1++ % 17) - 8) * 0.125f;
+      }
+      for (int k = 0; k < KV_DIM; ++k) {
+        kv_cache_cpu[block * BLOCK_BYTES / 2 + V_OFFSET / 2 + j * KV_DIM + k] =
+            ((cnt2++ % 17) - 8) * 0.125f;
+      }
+    }
+    block++;
+  }
+
+  CUDA_CHECK(cudaMemcpy(kv_cache_gpu, kv_cache_cpu.data(), KV_CACHE_SIZE_BYTES,
+                        cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(block_table_gpu, block_table_cpu.data(),
+                        sizeof(int) * MAX_BLOCKS_PER_SEQ * N_LAYERS,
+                        cudaMemcpyHostToDevice));
+
+  // 3. init output
+  vector<__nv_bfloat16> output_cpu(EMBEDDING_LENGTH, 0);
+  CUDA_CHECK(cudaMalloc(&output_gpu, sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+
+  // 4. attention
+  PagedAttention(0, q_proj_gpu, kv_cache_gpu, block_table_gpu, 32, output_gpu);
+
+  CUDA_CHECK(cudaMemcpy(output_cpu.data(), output_gpu,
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH,
+                        cudaMemcpyDeviceToHost));
+  for (int i = 0; i < EMBEDDING_LENGTH; ++i) {
+    printf("%f ", float(output_cpu[i]));
+  }
+}

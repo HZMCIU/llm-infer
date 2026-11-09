@@ -106,6 +106,55 @@ def test_rope():
     return input
 
 
+def test_paged_attention():
+    Q = np.arange(1, 2048 + 1).reshape(1, 2048)
+    K = np.arange(1, 512 * 32 + 1).reshape(32, 512)
+    V = np.arange(1, 512 * 32 + 1).reshape(32, 512)
+
+    Q = ((Q % 17) - 8) * 0.125
+    K = ((K % 17) - 8) * 0.125
+    V = ((V % 17) - 8) * 0.125
+
+    seq_q = 1
+    seq_k = 32
+    head_dim = 64
+
+    num_q_heads = 2048 // head_dim  # 32 个 Q 头
+    num_kv_heads = 512 // head_dim  # 8 个 KV 头
+    group_size = num_q_heads // num_kv_heads  # 每组 4 个 Q 头共享 1 个 KV 头
+
+    # Step 1: 拆分多头并对齐维度
+    # Q: (1, 2048) -> (seq_q=1, num_kv_heads=8, group_size=4, head_dim=64)
+    # 转置后变成: (8, 4, 1, 64)  含义: (KV头数, 组内Q头数, Q序列长度, 头维度)
+    Q_grouped = Q.reshape(seq_q, num_kv_heads, group_size, head_dim).transpose(
+        1, 2, 0, 3
+    )
+
+    # K: (32, 512) -> (seq_k=32, num_kv_heads=8, head_dim=64)
+    # 转置并插入一个维度变成: (8, 1, 32, 64)  含义: (KV头数, 1(用于广播), K序列长度, 头维度)
+    K_grouped = K.reshape(seq_k, num_kv_heads, head_dim).transpose(1, 0, 2)[
+        :, None, :, :
+    ]
+    V_grouped = V.reshape(seq_k, num_kv_heads, head_dim).transpose(1, 0, 2)[
+        :, None, :, :
+    ]
+
+    # Step 2: 计算 Q @ K^T
+    # K_grouped.swapaxes(-1, -2) 将最后两维从 (32, 64) 转置为 (64, 32)
+    # 矩阵乘法: (8, 4, 1, 64) @ (8, 1, 64, 32) -> 自动广播为 (8, 4, 1, 32)
+    scores = (Q_grouped @ K_grouped.swapaxes(-1, -2)) / np.sqrt(head_dim)
+
+    exp_scores = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
+    attn_weights = exp_scores / np.sum(
+        exp_scores, axis=-1, keepdims=True
+    )  # (8, 4, 1, 32)
+
+    output_grouped = attn_weights @ V_grouped
+
+    output_1 = output_grouped.transpose(2, 0, 1, 3).reshape(seq_q, 2048)
+    print(output_1)
+
+
 if __name__ == "__main__":
-    np.set_printoptions(suppress=True, threshold=1000)
-    test_rope()
+    np.set_printoptions(suppress=True, threshold=np.inf)
+    test_paged_attention()

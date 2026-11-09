@@ -72,6 +72,10 @@ int InitializeTransformer(Weights &weights, LayerContext &layer_context) {
   CUDA_CHECK(cudaMalloc(&layer_context.embed_proj,
                         sizeof(__nv_bfloat16) * VOCAB_SIZE * MAX_PROMPT_LEN));
 
+  CUDA_CHECK(cudaMalloc(&layer_context.last_generated_token, sizeof(int)));
+  CUDA_CHECK(cudaMalloc(&layer_context.last_generated_token_embedding,
+                        sizeof(__nv_bfloat16) * EMBEDDING_LENGTH));
+
   return 0;
 }
 
@@ -120,9 +124,8 @@ int main(int argc, char *argv[]) {
   Prefill(weights, token_info, layer_context, kv_cache_context, sampler);
 
   for (int i = 0; i < 300; ++i) {
-    Decode(weights, token_info, layer_context, kv_cache_context, sampler);
-    std::vector<int> &prompt = token_info.queue.front();
-    int next_token = prompt.back();
+    int next_token =
+        Decode(weights, token_info, layer_context, kv_cache_context, sampler);
     if (tokenizer.CheckEosToken(next_token)) {
       break;
     }

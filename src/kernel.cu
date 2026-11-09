@@ -4,7 +4,6 @@
 
 #include "helper.h"
 
-// float *gpu_inv_freq = nullptr;
 float *gpu_cos_table = nullptr;
 float *gpu_sin_table = nullptr;
 
@@ -30,26 +29,6 @@ void EmbeddingGather(int *input_token, __nv_bfloat16 *model_token_embedding,
   EmbeddingGatherKernel<<<input_token_num, 1024>>>(
       input_token, model_token_embedding, input_token_embedding,
       input_token_num);
-
-  CUDA_CHECK(cudaDeviceSynchronize());
-}
-
-__global__ void EmbeddingGatherDecodeKernel(int *last_tokens_gpu, int token_num,
-                                            __nv_bfloat16 *output,
-                                            __nv_bfloat16 *embed_tokens) {
-  int input_token = last_tokens_gpu[blockIdx.x];
-  int work_idx = blockIdx.x * 2048 + threadIdx.x;
-  if (work_idx < token_num * 2048) {
-    output[work_idx] = embed_tokens[input_token * 2048 + threadIdx.x];
-    output[work_idx + 2048] =
-        embed_tokens[input_token * 2048 + threadIdx.x + 1024];
-  }
-}
-
-void EmbeddingGatherDecode(int *last_token_gpu, int token_num,
-                           __nv_bfloat16 *output, __nv_bfloat16 *embed_tokens) {
-  EmbeddingGatherDecodeKernel<<<token_num, 1024>>>(last_token_gpu, token_num,
-                                                   output, embed_tokens);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
@@ -224,29 +203,46 @@ void Rope(__nv_bfloat16 *input, int token_num, int proj_dim) {
 }
 
 __global__ void RopeDecodeKernel(__nv_bfloat16 *input, int position_in_sequence,
-                                 int proj_dim) {
-  if (2 * threadIdx.x + 1 < proj_dim) {
-    int double_i = 2 * (threadIdx.x % 32);
-    float theta = 1.0 / (std::pow(500000.0f, ((float)double_i / HEAD_DIM)));
-    float angle = position_in_sequence * theta;
-    __nv_bfloat16 prev_2i = input[2 * threadIdx.x];
-    __nv_bfloat16 prev_2i_1 = input[2 * threadIdx.x + 1];
-    input[2 * threadIdx.x] =
-        (__nv_bfloat16)((float)prev_2i * std::cos(angle) -
-                        (float)prev_2i_1 * std::sin(angle));
-    input[2 * threadIdx.x + 1] =
-        (__nv_bfloat16)((float)prev_2i * std::sin(angle) +
-                        (float)prev_2i_1 * std::cos(angle));
-  }
-}
+                                 int head_dim, int proj_dim,
+                                 float *gpu_cos_table, float *gpu_sin_table) {
+  int half_dim = head_dim / 2;
+  int half_proj = proj_dim / 2;
 
-void RopeDecode(__nv_bfloat16 *input, int position_in_sequence, int proj_dim) {
-  int thread_num = proj_dim / 2;
-  if (thread_num > 1024) {
+  if (threadIdx.x >= half_proj) {
     return;
   }
 
-  RopeDecodeKernel<<<1, thread_num>>>(input, position_in_sequence, proj_dim);
+  int head_idx = threadIdx.x / half_dim;
+  int pair_idx = threadIdx.x % half_dim;
+
+  // Decode 阶段 input 只有 1 个 token，所以 base 不需要加 token_idx * proj_dim
+  int base = head_idx * head_dim;
+
+  // 与 Prefill 完全一致：前后半段配对 (pair_idx 和 pair_idx + half_dim)
+  int idx1 = base + pair_idx;
+  int idx2 = base + pair_idx + half_dim;
+
+  float x1 = (float)input[idx1];
+  float x2 = (float)input[idx2];
+
+  // 查表时使用当前 token 在序列中的真实位置 position_in_sequence
+  int table_idx = position_in_sequence * head_dim + pair_idx * 2;
+  float c = gpu_cos_table[table_idx];
+  float s = gpu_sin_table[table_idx];
+
+  input[idx1] = (__nv_bfloat16)(x1 * c - x2 * s);
+  input[idx2] = (__nv_bfloat16)(x1 * s + x2 * c);
+}
+
+void RopeDecode(__nv_bfloat16 *input, int position_in_sequence, int proj_dim) {
+  int num_thread = proj_dim / 2;
+  if (num_thread > 1024) {
+    std::cout << "max thread num in a block is 1024" << std::endl;
+    return;
+  }
+
+  RopeDecodeKernel<<<1, num_thread>>>(input, position_in_sequence, HEAD_DIM,
+                                      proj_dim, gpu_cos_table, gpu_sin_table);
 
   CUDA_CHECK(cudaDeviceSynchronize());
 }
@@ -358,54 +354,6 @@ void Softmax(__nv_bfloat16 *input, int token_num) {
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-__global__ void SoftmaxDecodeKernel(__nv_bfloat16 *input, int seq_len) {
-  __shared__ float m[1024];
-  __shared__ float d[1024];
-
-  int workIndex = blockIdx.x * MAX_SEQ_LEN + threadIdx.x;
-  float token = (float)input[workIndex];
-
-  m[threadIdx.x] = token;
-  d[threadIdx.x] = 1.0f;
-  __syncthreads();
-
-  for (int i = 1; i < seq_len; i = i * 2) {
-    if (threadIdx.x % (i * 2) == 0 && threadIdx.x + i < seq_len) {
-      float m_a = m[threadIdx.x];
-      float d_a = d[threadIdx.x];
-      float m_b = m[threadIdx.x + i];
-      float d_b = d[threadIdx.x + i];
-
-      // float m_new = fmaxf(m_a, m_b);
-      // float d_new = d_a * expf(m_a - m_new) + d_b * expf(m_b - m_new);
-      //
-      // m[threadIdx.x] = m_new;
-      // d[threadIdx.x] = d_new;
-      float m_new = fmaxf(m_a, m_b);
-      float d_new = 0.0f;
-      if (d_a > 0.0f)
-        d_new += d_a * expf(m_a - m_new); // 关键：跳过全掩码子树
-      if (d_b > 0.0f)
-        d_new += d_b * expf(m_b - m_new);
-
-      m[threadIdx.x] = m_new;
-      d[threadIdx.x] = d_new;
-    }
-    __syncthreads();
-  }
-
-  input[workIndex] = (__nv_bfloat16)(expf(token - m[0]) / d[0]);
-}
-
-void SoftmaxDecode(__nv_bfloat16 *input, int seq_len) {
-  if (seq_len > 1024) {
-    return;
-  }
-  SoftmaxDecodeKernel<<<NUM_Q_HEADS, seq_len>>>(input, seq_len);
-
-  CUDA_CHECK(cudaDeviceSynchronize());
-}
-
 __global__ void PagedAttentionKernel(int layer, __nv_bfloat16 *q_proj,
                                      __nv_bfloat16 *kv_cache,
                                      int *block_table_gpu, int seq_len_gpu,
@@ -469,6 +417,8 @@ __global__ void PagedAttentionKernel(int layer, __nv_bfloat16 *q_proj,
       float exp_score = expf(dot_product - current_max);
       d = d * correction_factor + exp_score;
       acc = acc * correction_factor + exp_score * (float)*v;
+
+      __syncthreads();
     }
   }
   output[q_head_id * HEAD_DIM + thread_id] = acc / d;

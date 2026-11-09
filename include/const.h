@@ -21,7 +21,7 @@ constexpr int GQA_ATTN_SCORES_TO_V_RATIO = 4;
 constexpr int VOCAB_SIZE = 128256;
 constexpr int END_OF_TEXT_TOKEN_ID = 128001; // <|end_of_text|>
 constexpr int EOT_ID_TOKEN_ID = 128009;      // <|eot_id|>
-constexpr int MAX_SEQ_LEN = 2048;            // TODO: make it tunable
+constexpr int MAX_SEQ_LEN = 512;             // TODO: make it tunable
 constexpr int BATCH_SIZE =
     2; // TODO: not even close to being good, it's just here to have batching
 constexpr int MAX_PROMPT_LEN = 512; // TODO: arbitrary, tunable
@@ -34,7 +34,7 @@ constexpr int BLOCK_BYTES = V_OFFSET * 2; // * 2 because K and V
 // 2GB
 constexpr int MAX_BLOCKS_PER_SEQ = MAX_SEQ_LEN / BLOCK_SIZE; // 2048 / 16 = 128
 constexpr size_t KV_CACHE_SIZE_BYTES =
-    N_LAYERS * MAX_BLOCKS_PER_SEQ * KV_DIM * 2 * 2; // TODO: 500MB
+    N_LAYERS * MAX_PROMPT_LEN * KV_DIM * 2 * 2; // TODO: 500MB
 constexpr int NUM_BLOCKS =
     KV_CACHE_SIZE_BYTES / BLOCK_BYTES; // 2*1024*1024*1024/(16*512*2*2) = 16384
 constexpr int MAX_SEQUENCES = BATCH_SIZE;
