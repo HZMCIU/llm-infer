@@ -180,8 +180,8 @@ void TokenEmbeddingPrefill(Weights &weights, TokenInfo &token_info,
 void TokenEmbeddingDecode(Weights &weights, TokenInfo &token_info,
                           LayerContext &layer_context) {
   std::vector<int> &prompt = token_info.queue.front();
-  // int last_generated_token = prompt.back();
-  int last_generated_token = 128007;
+  int last_generated_token = prompt.back();
+  // int last_generated_token = 128007;
 
   CUDA_CHECK(cudaMemcpy(layer_context.last_generated_token,
                         &last_generated_token, sizeof(int),
@@ -475,11 +475,11 @@ void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
 
         CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
 
-    RopeDecode(layer_context.q_proj, prompt_len, EMBEDDING_LENGTH);
-    RopeDecode(layer_context.k_proj, prompt_len, KV_DIM);
+    RopeDecode(layer_context.q_proj, prompt_len - 1, EMBEDDING_LENGTH);
+    RopeDecode(layer_context.k_proj, prompt_len - 1, KV_DIM);
 
-    int logical_block_idx = prompt_len / BLOCK_SIZE;
-    int token_in_block_idx = prompt_len % BLOCK_SIZE;
+    int logical_block_idx = (prompt_len - 1) / BLOCK_SIZE;
+    int token_in_block_idx = (prompt_len - 1) % BLOCK_SIZE;
 
     int block =
         kv_cache_context
@@ -513,13 +513,13 @@ void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
         N_LAYERS * MAX_BLOCKS_PER_SEQ * sizeof(int), cudaMemcpyHostToDevice));
 
     PagedAttention(layer, layer_context.q_proj, kv_cache_context.kv_cache,
-                   kv_cache_context.block_table_gpu, prompt_len + 1,
+                   kv_cache_context.block_table_gpu, prompt_len,
                    layer_context.attn_scores_v);
 
-    if (layer == 0) {
-      DumpBf16ToTxt("b.txt", layer_context.attn_scores_v, prompt_len + 1,
-                    prompt_len + 1);
-    }
+    // if (layer == 0) {
+    //   DumpBf16ToTxt("b.txt", layer_context.attn_scores_v, prompt_len + 1,
+    //                 prompt_len + 1);
+    // }
     cublasStatus_t o_proj_staus =
         cublasGemmEx(layer_context.cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
 
@@ -600,7 +600,8 @@ void TransformerLayersDecodeCompute(Weights &weights, TokenInfo &token_info,
                    &layer_context.embed_alpha, weights.embed_tokens,
                    CUDA_R_16BF, EMBEDDING_LENGTH,
 
-                   layer_context.input, CUDA_R_16BF, EMBEDDING_LENGTH,
+                   layer_context.last_generated_token_embedding, CUDA_R_16BF,
+                   EMBEDDING_LENGTH,
 
                    &layer_context.embed_beta, layer_context.embed_proj,
                    CUDA_R_16BF, VOCAB_SIZE,
@@ -657,7 +658,7 @@ int Decode(Weights &weights, TokenInfo &token_info, LayerContext &layer_context,
                                  kv_cache_context, prompt_len);
 
   int max_token_idx =
-      Sample(weights, token_info, layer_context, sampler, prompt_len);
+      Sample(weights, token_info, layer_context, sampler, 1);
 
   prompt.push_back(max_token_idx);
   // std::vector<int> &prompt = token_info.queue.front();
