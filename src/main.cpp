@@ -123,7 +123,7 @@ int main(int argc, char *argv[]) {
 
   Prefill(weights, token_info, layer_context, kv_cache_context, sampler);
 
-  for (int i = 0; i < 300; ++i) {
+  for (int i = 0; i < 2048; ++i) {
     int next_token =
         Decode(weights, token_info, layer_context, kv_cache_context, sampler);
     if (tokenizer.CheckEosToken(next_token)) {
